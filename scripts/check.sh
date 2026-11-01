@@ -7,6 +7,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pytest -q
 cd frontend
+node e2e/browser-check.mjs
 npx vue-tsc --noEmit
 npx vitest run --silent
 npx vite build --logLevel warn
