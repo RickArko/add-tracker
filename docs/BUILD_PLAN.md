@@ -71,6 +71,8 @@ The game is for an analytical person who wants to play against their own numbers
 | P6 | Login throttling, cross-site write refusal, strict CSP and no-store on API responses | `test_auth.py`; the e2e fails on any CSP violation |
 | P7 | Spreadsheet formula injection neutralised in CSV | `test_export_csv_neutralises_spreadsheet_formulas` |
 | P8 | Single-account signup by default | `test_first_mode_allows_only_one_account` |
+| P9 | Recovery without identity: a one-time code, plus an optional email stored only as a keyed hash | `test_recovery.py`, e2e recovery |
+| P10 | Changing or recovering a passphrase cancels every older route back in | `test_changing_passphrase_cancels_every_older_route_back_in` |
 
 **Known limit:** data isn't end-to-end encrypted. Fly encrypts volumes at rest, but whoever runs the server can read the database. Habit Helper is also not a HIPAA-covered service. Both must be resolved or disclosed before hosting data for other people (see Phase 3).
 

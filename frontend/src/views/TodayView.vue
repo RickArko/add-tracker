@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import EntryDialog from "../components/EntryDialog.vue";
 import TallyMarks from "../components/TallyMarks.vue";
 import TrackerForm from "../components/TrackerForm.vue";
+import { auth } from "../lib/auth";
 import { api, ApiError, timeZone, type Entry, type TodayTracker, type Tracker } from "../lib/api";
 import { duration, formatNumber, longDate, quantity, shortDate, timeSince, unitLabel } from "../lib/format";
 import {
@@ -215,6 +216,10 @@ onBeforeUnmount(() => {
     </p>
     <p v-if="waiting" class="waiting" role="status">
       {{ waiting }} {{ waiting === 1 ? "log" : "logs" }} waiting to send
+    </p>
+
+    <p v-if="!auth.hasRecoveryCode" class="waiting">
+      A forgotten passphrase could lock you out. <RouterLink to="/settings">Create a recovery code</RouterLink>
     </p>
 
     <section v-if="loaded && !trackers.length && !loadError" class="first-run">

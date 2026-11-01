@@ -7,6 +7,8 @@ import { router } from "./router";
 import "./style.css";
 
 setUnauthorizedHandler(() => {
+  // Drops the saved Today view if a session ends elsewhere. Unsent logs wait for the next log in.
+  if (auth.username) localStorage.removeItem(`tally.today.${auth.username}`);
   auth.username = null;
   void router.push("/login");
 });

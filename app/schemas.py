@@ -63,12 +63,59 @@ class AccountDelete(StrictBody):
 
 class UserOut(BaseModel):
     username: str
+    has_recovery_code: bool = False
+    has_email: bool = False
+
+
+class WithRecoveryCode(UserOut):
+    recovery_code: str
 
 
 class AuthStatus(BaseModel):
     user: UserOut | None
     signup_open: bool
     first_run: bool
+    email_enabled: bool
+
+
+# Plain ASCII only, lowercased, so the address hashed is exactly the address mailed.
+Email = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        to_lower=True,
+        max_length=254,
+        pattern=r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$",
+    ),
+]
+
+
+class RecoverBody(StrictBody):
+    username: str = Field(max_length=40)
+    recovery_code: str = Field(max_length=60)
+    new_password: NewPassword
+
+
+class PasswordConfirm(StrictBody):
+    password: str = Field(max_length=200)
+
+
+class EmailAdd(StrictBody):
+    email: Email
+    password: str = Field(max_length=200)
+
+
+class EmailRequest(StrictBody):
+    email: Email
+
+
+class TokenBody(StrictBody):
+    token: str = Field(max_length=100)
+
+
+class TokenReset(StrictBody):
+    token: str = Field(max_length=100)
+    new_password: NewPassword
 
 
 class TrackerCreate(StrictBody):

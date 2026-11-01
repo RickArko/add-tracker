@@ -1,6 +1,7 @@
 """Password hashing, session tokens, login throttling, and the current-user dependency."""
 
 import hashlib
+import hmac
 import secrets
 import threading
 import time
@@ -37,6 +38,29 @@ def verify_password(password_hash: str | None, password: str) -> bool:
     return ok and password_hash is not None
 
 
+# No 0/O or 1/I/L/U confusion. 20 characters of this alphabet give 100 bits of randomness.
+_CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ01"
+
+
+def new_recovery_code() -> str:
+    raw = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(20))
+    return "-".join(raw[i : i + 4] for i in range(0, 20, 4))
+
+
+def normalize_recovery_code(code: str) -> str:
+    cleaned = "".join(ch for ch in code.upper() if ch.isalnum())
+    cleaned = cleaned.replace("O", "0").replace("I", "1").replace("L", "1")
+    return "-".join(cleaned[i : i + 4] for i in range(0, len(cleaned), 4))
+
+
+def email_hash(email: str, pepper: str) -> str:
+    return hmac.new(pepper.encode(), email.strip().lower().encode(), hashlib.sha256).hexdigest()
+
+
+def hash_token(token: str) -> str:
+    return _hash_token(token)
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -68,6 +92,10 @@ def end_session(db: Session, request: Request, response: Response) -> None:
     if token:
         db.execute(delete(AuthSession).where(AuthSession.token_hash == _hash_token(token)))
     response.delete_cookie(COOKIE_NAME, path="/")
+
+
+def end_all_sessions(db: Session, user: User) -> None:
+    db.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
 
 
 def end_other_sessions(db: Session, user: User, request: Request) -> None:

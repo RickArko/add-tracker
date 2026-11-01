@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.config import load_settings
 from app.db import make_engine, now_utc, run_migrations
-from app.models import AuthSession, Entry, LimitPeriod, Tracker, User
+from app.models import AuthSession, AuthToken, Entry, LimitPeriod, Tracker, User
 from app.security import hash_password
 
 DEMO_USER = "demo"
@@ -34,9 +34,15 @@ def reset_password(session: Session, username: str) -> None:
     if len(password) < 10:
         sys.exit("Passphrase must be at least 10 characters.")
     user.password_hash = hash_password(password)
+    # Cancels every older route back in. The user makes a new code in Settings.
+    user.recovery_code_hash = None
+    user.email_hash = None
+    session.query(AuthToken).filter(AuthToken.user_id == user.id).delete()
     session.query(AuthSession).filter(AuthSession.user_id == user.id).delete()
     session.commit()
-    print(f"Passphrase updated for {user.username}. All sessions were signed out.")
+    print(
+        f"Passphrase updated for {user.username}. Sessions, recovery code and email were cleared."
+    )
 
 
 def seed_demo(session: Session) -> None:

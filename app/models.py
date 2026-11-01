@@ -25,6 +25,9 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(40), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    recovery_code_hash: Mapped[str | None] = mapped_column(String(255))
+    # A keyed hash. The address itself is never stored, so a leaked database has no email list.
+    email_hash: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
 class AuthSession(Base):
@@ -110,3 +113,15 @@ class NoUseDay(Base):
         ForeignKey("trackers.id", ondelete="CASCADE"), primary_key=True
     )
     day: Mapped[str] = mapped_column(String(10), primary_key=True)
+
+
+class AuthToken(Base):
+    """A single-use link sent by email. Only a hash is stored."""
+
+    __tablename__ = "auth_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(12))
+    email_hash: Mapped[str | None] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)

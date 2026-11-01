@@ -4,6 +4,7 @@ const PORT = 8765;
 // Kept in the environment so test workers can reach the same file.
 process.env.TALLY_E2E_DB ??= `/tmp/tally-e2e-${process.pid}.db`;
 const db = process.env.TALLY_E2E_DB;
+process.env.TALLY_E2E_OUTBOX ??= `/tmp/tally-e2e-${process.pid}.mail`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -24,6 +25,12 @@ export default defineConfig({
     cwd: "..",
     url: `http://127.0.0.1:${PORT}/healthz`,
     reuseExistingServer: false,
-    env: { TALLY_DB_PATH: db, TALLY_SIGNUP: "open" },
+    env: {
+      TALLY_DB_PATH: db,
+      TALLY_SIGNUP: "open",
+      TALLY_EMAIL_OUTBOX: process.env.TALLY_E2E_OUTBOX,
+      TALLY_EMAIL_PEPPER: "test-only",
+      TALLY_PUBLIC_URL: `http://127.0.0.1:${PORT}`,
+    },
   },
 });

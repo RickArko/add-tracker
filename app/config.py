@@ -16,6 +16,15 @@ class Settings:
     secure_cookies: bool = False
     session_days: int = 30
     frontend_dist: Path = Path("frontend/dist")
+    # Optional email recovery. It stays off and hidden until these are all set.
+    public_url: str = ""
+    email_pepper: str = ""
+    email_from: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    email_outbox: Path | None = None
 
     @property
     def db_url(self) -> str:
@@ -32,4 +41,12 @@ def load_settings() -> Settings:
         secure_cookies=os.environ.get("TALLY_SECURE_COOKIES", "0") == "1",
         session_days=int(os.environ.get("TALLY_SESSION_DAYS", "30")),
         frontend_dist=Path(os.environ.get("TALLY_FRONTEND_DIST", "frontend/dist")),
+        public_url=os.environ.get("TALLY_PUBLIC_URL", "").rstrip("/"),
+        email_pepper=os.environ.get("TALLY_EMAIL_PEPPER", ""),
+        email_from=os.environ.get("TALLY_EMAIL_FROM", ""),
+        smtp_host=os.environ.get("TALLY_SMTP_HOST", ""),
+        smtp_port=int(os.environ.get("TALLY_SMTP_PORT", "587")),
+        smtp_user=os.environ.get("TALLY_SMTP_USER", ""),
+        smtp_password=os.environ.get("TALLY_SMTP_PASSWORD", ""),
+        email_outbox=Path(p) if (p := os.environ.get("TALLY_EMAIL_OUTBOX")) else None,
     )

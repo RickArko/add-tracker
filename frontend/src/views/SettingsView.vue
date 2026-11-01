@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import PlanForm from "../components/PlanForm.vue";
+import RecoveryCodeNotice from "../components/RecoveryCodeNotice.vue";
 import TrackerForm from "../components/TrackerForm.vue";
 import { api, ApiError, type Tracker } from "../lib/api";
 import { auth, loadAuth } from "../lib/auth";
@@ -22,6 +23,15 @@ const currentPassword = ref("");
 const newPassword = ref("");
 const passwordMessage = ref("");
 const passwordError = ref("");
+
+const recoveryPassword = ref("");
+const recoveryError = ref("");
+const shownCode = ref("");
+const emailAddress = ref("");
+const emailPassword = ref("");
+const emailMessage = ref("");
+const emailError = ref("");
+const removeEmailPassword = ref("");
 
 const deletePassword = ref("");
 const deleteError = ref("");
@@ -76,17 +86,59 @@ async function removeTracker(tracker: Tracker) {
   }
 }
 
+async function createRecoveryCode() {
+  recoveryError.value = "";
+  try {
+    const result = await api<{ recovery_code: string }>("/api/auth/recovery-code", "POST", {
+      password: recoveryPassword.value,
+    });
+    recoveryPassword.value = "";
+    shownCode.value = result.recovery_code;
+    await loadAuth();
+  } catch (e) {
+    recoveryError.value = message(e, "No code was created. Try again.");
+  }
+}
+
+async function addEmail() {
+  emailMessage.value = "";
+  emailError.value = "";
+  try {
+    await api("/api/auth/email", "POST", { email: emailAddress.value, password: emailPassword.value });
+    emailPassword.value = "";
+    emailMessage.value = "Check your inbox and open the link within 24 hours to confirm.";
+  } catch (e) {
+    emailError.value = message(e, "That didn't send. Try again.");
+  }
+}
+
+async function removeEmail() {
+  emailMessage.value = "";
+  emailError.value = "";
+  try {
+    await api("/api/auth/email", "DELETE", { password: removeEmailPassword.value });
+    removeEmailPassword.value = "";
+    await loadAuth();
+    emailMessage.value = "Recovery email removed.";
+  } catch (e) {
+    emailError.value = message(e, "It wasn't removed. Try again.");
+  }
+}
+
 async function changePassword() {
   passwordMessage.value = "";
   passwordError.value = "";
   try {
-    await api("/api/auth/password", "POST", {
+    const result = await api<{ recovery_code: string }>("/api/auth/password", "POST", {
       current_password: currentPassword.value,
       new_password: newPassword.value,
     });
     currentPassword.value = "";
     newPassword.value = "";
-    passwordMessage.value = "Passphrase changed. Other devices were logged out.";
+    shownCode.value = result.recovery_code;
+    await loadAuth();
+    window.scrollTo(0, 0);
+    passwordMessage.value = "Passphrase changed. Other devices were logged out, your recovery code was replaced, and any recovery email was removed, so add it again if you want it.";
   } catch (e) {
     passwordError.value = message(e, "The passphrase wasn't changed. Try again.");
   }
@@ -172,11 +224,52 @@ onMounted(load);
 
     <section>
       <h2>Your data</h2>
-      <p>Your logs are stored only on this server, under your account. This app has no ads, analytics or outside services, and nothing is sent to anyone else.</p>
+      <p>Your logs are stored only on this server, under your account. This app has no ads or analytics, and your logs are never sent to anyone else.</p>
       <p class="row-actions">
         <a class="button secondary" href="/api/export.csv" download>Download as CSV</a>
         <a class="button secondary" href="/api/export.json" download>Download as JSON</a>
       </p>
+    </section>
+
+    <section>
+      <h2>Account recovery</h2>
+      <RecoveryCodeNotice v-if="shownCode" :code="shownCode" button-label="I've saved it" @done="shownCode = ''" />
+      <form v-else @submit.prevent="createRecoveryCode">
+        <p v-if="auth.hasRecoveryCode">You have a recovery code. Making a new one stops the old one working.</p>
+        <p v-else><strong>You don't have a recovery code yet.</strong> Without one, a forgotten passphrase can lock you out.</p>
+        <label class="field">
+          <span>Your passphrase</span>
+          <input v-model="recoveryPassword" type="password" required autocomplete="current-password" />
+        </label>
+        <p v-if="recoveryError" class="error" role="alert">{{ recoveryError }}</p>
+        <button class="secondary" type="submit">{{ auth.hasRecoveryCode ? "Make a new recovery code" : "Create a recovery code" }}</button>
+      </form>
+
+      <template v-if="auth.emailEnabled">
+        <h3>Recovery email (optional)</h3>
+        <p>Your address isn't stored, only a keyed hash of it. To reset, you type it again and we send a link to it. Someone with both the database and our secret key could test whether a guessed address matches, and our email provider sees the address each time we send to it.</p>
+        <form v-if="!auth.hasEmail" @submit.prevent="addEmail">
+          <label class="field">
+            <span>Email</span>
+            <input v-model="emailAddress" type="email" required maxlength="254" autocomplete="email" />
+          </label>
+          <label class="field">
+            <span>Your passphrase</span>
+            <input v-model="emailPassword" type="password" required autocomplete="current-password" />
+          </label>
+          <button class="secondary" type="submit">Send confirmation link</button>
+        </form>
+        <form v-else @submit.prevent="removeEmail">
+          <p>A recovery email is on your account.</p>
+          <label class="field">
+            <span>Your passphrase</span>
+            <input v-model="removeEmailPassword" type="password" required autocomplete="current-password" />
+          </label>
+          <button class="secondary" type="submit">Remove recovery email</button>
+        </form>
+        <p v-if="emailError" class="error" role="alert">{{ emailError }}</p>
+        <p v-if="emailMessage" role="status">{{ emailMessage }}</p>
+      </template>
     </section>
 
     <section>

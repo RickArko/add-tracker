@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, load_settings
 from app.db import make_engine, run_migrations
+from app.mailer import build_mailer
 from app.routers import auth, data
 from app.security import LoginThrottle
 
@@ -32,6 +33,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.login_throttle = LoginThrottle()
     app.state.signup_lock = threading.Lock()
+    app.state.mailer = build_mailer(settings)
+    app.state.email_address_throttle = LoginThrottle(limit=3, window=3600)
+    app.state.email_flow_throttle = LoginThrottle(limit=100, window=3600)
 
     @app.exception_handler(UnicodeEncodeError)
     async def bad_text(_request: Request, _exc: UnicodeEncodeError) -> JSONResponse:

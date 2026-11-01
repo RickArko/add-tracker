@@ -16,6 +16,10 @@ scripts/demo.sh   # a throwaway copy with 60 days of made-up data at http://127.
 
 The first account created on a fresh database is the only one allowed, unless you change `TALLY_SIGNUP`.
 
+## Recovery email (optional)
+
+It stays off and hidden until `TALLY_PUBLIC_URL`, `TALLY_EMAIL_PEPPER`, `TALLY_EMAIL_FROM` and `TALLY_SMTP_HOST`, `TALLY_SMTP_USER`, `TALLY_SMTP_PASSWORD` are set. Keep the pepper secret and never change it, because existing recovery emails stop matching if it changes. `TALLY_EMAIL_OUTBOX=<file>` writes mail to a local file for development.
+
 ## Settings
 
 | Variable | Default | Meaning |
@@ -29,7 +33,7 @@ The first account created on a fresh database is the only one allowed, unless yo
 
 - **Back up:** Settings has CSV and JSON downloads. For a full copy, run `uv run python -m app.cli backup backup.db`.
 - **Import:** there's no way to load an export back in yet, so a `.backup` copy is what you'd restore from.
-- **Forgotten passphrase:** there's no email reset. Whoever runs the server can use `uv run python -m app.cli reset-password <username>`. On Fly, open `fly ssh console`, then run `cd /srv && .venv/bin/python -m app.cli <command>`. Files you back up there can be fetched with `fly ssh sftp get`.
+- **Forgotten passphrase:** use your recovery code on the log in page, or a confirmed recovery email if email is turned on. Failing that, whoever runs the server can use `uv run python -m app.cli reset-password <username>`. On Fly, open `fly ssh console`, then run `cd /srv && .venv/bin/python -m app.cli <command>`. Files you back up there can be fetched with `fly ssh sftp get`.
 
 ## Deploy to Fly
 

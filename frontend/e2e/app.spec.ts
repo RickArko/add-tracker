@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -26,6 +27,7 @@ async function register(page: Page, name = unique()) {
   await page.getByLabel("Username").fill(name);
   await page.getByLabel("Passphrase").fill(PASSPHRASE);
   await page.getByRole("button", { name: "Create account" }).click();
+  await page.getByRole("button", { name: "I've saved it" }).click();
   await expect(page.getByText("What do you want to keep track of?")).toBeVisible();
   return name;
 }
@@ -409,6 +411,89 @@ test("an email as a username gets a plain explanation, not raw validation text",
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByText("String should match")).toBeHidden();
+});
+
+const OUTBOX = process.env.TALLY_E2E_OUTBOX!;
+const latestEmail = () => JSON.parse(readFileSync(OUTBOX, "utf8").trim().split("\n").at(-1)!);
+const linkFrom = (body: string) => new URL(body.match(/https?:\/\/\S+/)![0]);
+
+test("a recovery code gets you back in, and a new one replaces it", async ({ page }) => {
+  await page.goto("/login");
+  const create = page.getByRole("button", { name: "Create an account" });
+  if (await create.isVisible()) await create.click();
+  const name = unique();
+  await page.getByLabel("Username").fill(name);
+  await page.getByLabel("Passphrase").fill(PASSPHRASE);
+  await page.getByRole("button", { name: "Create account" }).click();
+  const code = (await page.getByTestId("recovery-code").textContent())!;
+  await page.getByRole("button", { name: "I've saved it" }).click();
+  await addAlcohol(page);
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByRole("button", { name: "Forgot your passphrase?" }).click();
+  await page.getByLabel("Username").fill(name);
+  await page.getByLabel("Recovery code").fill(code);
+  await page.getByLabel("New passphrase").fill("my replacement passphrase");
+  await page.getByRole("button", { name: "Set new passphrase" }).click();
+  const second = (await page.getByTestId("recovery-code").textContent())!;
+  expect(second).not.toBe(code);
+  await page.getByRole("button", { name: "I've saved it" }).click();
+  await expect(page.getByRole("heading", { name: "Alcohol" })).toBeVisible();
+});
+
+test("an email can be confirmed, then reset a forgotten passphrase", async ({ page }) => {
+  const name = await register(page);
+  const email = `${name}@example.com`;
+  await page.goto("/settings");
+  await page.getByLabel("Email").fill(email);
+  await page.locator("form", { hasText: "Send confirmation link" }).getByLabel("Your passphrase").fill(PASSPHRASE);
+  await page.getByRole("button", { name: "Send confirmation link" }).click();
+  await expect(page.getByText("Check your inbox")).toBeVisible();
+
+  await expect.poll(() => latestEmail().to).toBe(email);
+  const confirm = linkFrom(latestEmail().body);
+  await page.goto(confirm.pathname + confirm.search);
+  await expect(page).not.toHaveURL(/token=/);
+  await page.getByRole("button", { name: "Confirm email" }).click();
+  await expect(page.getByText("Your email is confirmed")).toBeVisible();
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByRole("button", { name: "Forgot your passphrase?" }).click();
+  await page.getByRole("button", { name: "Reset by email instead" }).click();
+  await page.getByLabel("Email").fill(email);
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByText("a reset link is on its way")).toBeVisible();
+
+  await expect.poll(() => latestEmail().subject).toBe("Reset your passphrase");
+  const reset = linkFrom(latestEmail().body);
+  await page.goto(reset.pathname + reset.search);
+  await page.getByLabel("New passphrase").fill("my replacement passphrase");
+  await page.getByRole("button", { name: "Set new passphrase" }).click();
+  await page.getByRole("button", { name: "I've saved it" }).click();
+  await expect(page.getByText("What do you want to keep track of?")).toBeVisible();
+});
+
+test("a confirm link opened while logged out asks to log in, then still works", async ({ page }) => {
+  const name = await register(page);
+  const email = `${name}@example.com`;
+  await page.goto("/settings");
+  await page.getByLabel("Email").fill(email);
+  await page.locator("form", { hasText: "Send confirmation link" }).getByLabel("Your passphrase").fill(PASSPHRASE);
+  await page.getByRole("button", { name: "Send confirmation link" }).click();
+  await expect.poll(() => latestEmail().to).toBe(email);
+  const confirm = linkFrom(latestEmail().body);
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+
+  await page.goto(confirm.pathname + confirm.search);
+  await page.getByRole("link", { name: "Log in" }).click();
+  await page.getByLabel("Username").fill(name);
+  await page.getByLabel("Passphrase").fill(PASSPHRASE);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm email" }).click();
+  await expect(page.getByText("Your email is confirmed")).toBeVisible();
 });
 
 test("exports download and contain my data", async ({ page }) => {

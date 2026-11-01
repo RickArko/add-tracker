@@ -98,7 +98,7 @@ def test_change_password_signs_out_other_devices(client, tmp_path):
     bad = {"current_password": "nope", "new_password": "another good passphrase"}
     assert client.post("/api/auth/password", json=bad).status_code == 403
     good = {"current_password": PASSWORD, "new_password": "another good passphrase"}
-    assert client.post("/api/auth/password", json=good).status_code == 204
+    assert client.post("/api/auth/password", json=good).status_code == 200
     assert client.get("/api/trackers").status_code == 200
     assert other.get("/api/trackers").status_code == 401
 
