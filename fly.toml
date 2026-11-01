@@ -1,0 +1,31 @@
+# Set your own unique app name, or let `fly launch --no-deploy --copy-config` choose one.
+app = "tally-CHANGE-ME"
+primary_region = "iad"
+
+[build]
+
+[env]
+  TALLY_SIGNUP = "first"
+  TALLY_SECURE_COOKIES = "1"
+
+[[mounts]]
+  source = "tally_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
