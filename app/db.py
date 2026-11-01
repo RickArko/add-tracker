@@ -55,4 +55,4 @@ def run_migrations(db_url: str) -> None:
     config = Config()
     config.set_main_option("script_location", str(MIGRATIONS_DIR))
     config.attributes["db_url"] = db_url
-    command.upgrade(config, "head")
+    command.upgrade(config, "heads")

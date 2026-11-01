@@ -141,7 +141,26 @@ def _stats_for(db: Session, tracker: Tracker, days: int, tz: ZoneInfo) -> dict:
         ],
         plan=plan,
         confirmed_days=[date.fromisoformat(day) for day in confirmed],
+        stopped_on=date.fromisoformat(tracker.stopped_on) if tracker.stopped_on else None,
     )
+
+
+def _apply_stopped_on(tracker: Tracker, stopped_on: date | None, tz: ZoneInfo) -> None:
+    """Sets the last day of use. It only means something alongside a goal of stopping."""
+    if stopped_on is None or tracker.goal != "quit":
+        tracker.stopped_on = None
+        return
+    if stopped_on.isoformat() == tracker.stopped_on:
+        return  # Unchanged, so renaming after travelling west can't fail on the date.
+    if stopped_on.isoformat() >= _local_today(tz):
+        raise HTTPException(status_code=422, detail="Your last use has to be before today.")
+    if stopped_on < EARLIEST_ENTRY.date():
+        raise HTTPException(status_code=422, detail="Check the year: that date is too far back.")
+    if tracker.step_amount:
+        raise HTTPException(
+            status_code=422, detail="Turn off levels first, since you've already stopped."
+        )
+    tracker.stopped_on = stopped_on.isoformat()
 
 
 def _plan_row(tracker: Tracker) -> PlanRow | None:
@@ -179,9 +198,11 @@ def create_tracker(
     db: Session = Depends(get_db),
 ) -> TrackerOut:
     values = body.model_dump()
+    stopped_on = values.pop("stopped_on")
     if values["goal"] == "quit":
         values["daily_limit"] = None
     tracker = Tracker(user_id=user.id, created_at=now_utc(), **values)
+    _apply_stopped_on(tracker, stopped_on, tz)
     db.add(tracker)
     _record_period(db, tracker, tz)
     db.commit()
@@ -202,12 +223,18 @@ def update_tracker(
         archived = changes.pop("archived")
         if archived is not None:
             tracker.archived_at = now_utc() if archived else None
+    new_stopped_on = changes.pop("stopped_on", None)
+    stopped_on_sent = "stopped_on" in body.model_fields_set
     for field, value in changes.items():
         if value is None and field != "daily_limit":
             raise HTTPException(status_code=422, detail=f"{field} can't be empty.")
         setattr(tracker, field, value)
     if tracker.goal == "quit":
         tracker.daily_limit = None
+    if stopped_on_sent:
+        _apply_stopped_on(tracker, new_stopped_on, tz)
+    elif tracker.goal != "quit":
+        tracker.stopped_on = None
     if tracker.step_amount and tracker.category in CLINICIAN_ONLY_TAPER:
         _clear_plan(tracker)
     _record_period(db, tracker, tz)
@@ -233,6 +260,10 @@ def set_plan(
         raise HTTPException(
             status_code=422,
             detail="Levels aren't available for this, because tapering it needs a clinician.",
+        )
+    if tracker.stopped_on:
+        raise HTTPException(
+            status_code=422, detail="Levels are for cutting down, and you've already stopped."
         )
     if body.step_amount > body.baseline_amount:
         raise HTTPException(status_code=422, detail="Each step must be smaller than your start.")

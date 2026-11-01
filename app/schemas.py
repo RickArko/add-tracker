@@ -78,6 +78,7 @@ class TrackerCreate(StrictBody):
     unit: Unit = "time"
     default_amount: Amount = 1
     daily_limit: Limit | None = None
+    stopped_on: date | None = None
 
 
 class TrackerUpdate(StrictBody):
@@ -87,6 +88,7 @@ class TrackerUpdate(StrictBody):
     unit: Unit | None = None
     default_amount: Amount | None = None
     daily_limit: Limit | None = None
+    stopped_on: date | None = None
     archived: bool | None = None
 
 
@@ -106,6 +108,7 @@ class TrackerOut(BaseModel):
     step_amount: float | None
     clear_days: int | None
     plan_started_on: str | None
+    stopped_on: str | None
 
 
 class NoUseBody(StrictBody):

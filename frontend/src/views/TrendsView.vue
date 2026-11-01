@@ -22,6 +22,8 @@ const triggerPeak = computed(() =>
   Math.max(1, ...(stats.value?.triggers ?? []).map((t) => t.uses + t.urges)),
 );
 const hasUses = computed(() => (summary.value?.uses_in_window ?? 0) > 0);
+// The panel above already says all of this for someone who has stopped.
+const stopped = computed(() => Boolean(stats.value?.game.stopped));
 
 const weekLine = computed(() => {
   const s = summary.value;
@@ -104,20 +106,20 @@ onMounted(async () => {
         <GamePanel :game="stats.game" :tracker="tracker" />
 
         <dl class="facts">
-          <div v-if="weekLine">
+          <div v-if="weekLine && !stopped">
             <dt>Last 7 full days</dt>
             <dd>{{ weekLine }}</dd>
           </div>
-          <div>
+          <div v-if="!stopped">
             <dt>Time since last logged</dt>
             <dd>{{ summary.last_use_at ? timeSince(summary.last_use_at) : "Nothing logged yet" }}</dd>
           </div>
-          <div v-if="summary.within_goal && summary.within_goal.of > 0">
+          <div v-if="!stopped && summary.within_goal && summary.within_goal.of > 0">
             <dt>Days within your goal</dt>
             <dd>{{ summary.within_goal.days }} of {{ summary.within_goal.of }}</dd>
           </div>
           <div>
-            <dt>Urges without use</dt>
+            <dt>{{ stopped ? "Urges in this period" : "Urges without use" }}</dt>
             <dd>
               {{ summary.urges_in_window }}
             </dd>
@@ -128,11 +130,12 @@ onMounted(async () => {
           </div>
         </dl>
 
-        <p v-if="summary.unlogged_days" class="section-note">
+        <p v-if="summary.unlogged_days && !stopped" class="section-note">
           {{ summary.unlogged_days }} {{ summary.unlogged_days === 1 ? "day has" : "days have" }} no logs in this period. They show as empty and don't count toward goals, records or levels.
         </p>
 
-        <section>
+        <p v-if="stopped && !hasUses" class="section-note">No use logged in this period.</p>
+        <section v-else>
           <h2>Use per day</h2>
           <p class="section-note">{{ quantity(summary.amount_in_window, tracker.unit) }} since {{ shortDate(stats.window_start) }}</p>
           <DailyChart :daily="stats.daily" :unit="tracker.unit" />

@@ -6,7 +6,7 @@ import TrackerForm from "../components/TrackerForm.vue";
 import { api, ApiError, type Tracker } from "../lib/api";
 import { auth, loadAuth } from "../lib/auth";
 import { goalLabel } from "../lib/catalog";
-import { quantity } from "../lib/format";
+import { fullDate, quantity } from "../lib/format";
 import { clearLocalData, flushQueue, getQueue } from "../lib/offline";
 
 const router = useRouter();
@@ -143,6 +143,7 @@ onMounted(load);
             <div>
               <strong>{{ t.name }}</strong>
               <small v-if="t.archived_at">Hidden from Today. History is kept.</small>
+              <small v-else-if="t.stopped_on">Stopped {{ fullDate(t.stopped_on) }}</small>
               <small v-else>
                 {{ goalLabel(t.goal) }}<template v-if="t.daily_limit !== null">, limit {{ quantity(t.daily_limit, t.unit) }} a day</template>
               </small>
@@ -150,7 +151,7 @@ onMounted(load);
             </div>
             <div class="row-actions">
               <button type="button" class="quiet" @click="editingId = t.id">Edit</button>
-              <button v-if="!NO_LEVELS.includes(t.category)" type="button" class="quiet" @click="planFor = t.id">{{ t.step_amount ? "Change levels" : "Set up levels" }}</button>
+              <button v-if="!NO_LEVELS.includes(t.category) && !t.stopped_on" type="button" class="quiet" @click="planFor = t.id">{{ t.step_amount ? "Change levels" : "Set up levels" }}</button>
               <button v-if="t.step_amount" type="button" class="quiet" @click="removePlan(t)">Turn off levels</button>
               <button v-if="t.archived_at" type="button" class="quiet" @click="setArchived(t, false)">Show on Today</button>
               <button v-else type="button" class="quiet" @click="setArchived(t, true)">Hide</button>

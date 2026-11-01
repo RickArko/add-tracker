@@ -352,7 +352,7 @@ def test_upgrade_from_first_release_keeps_data(tmp_path):
                 "VALUES (1,'use','2026-01-06 10:00:00.000000',6)"
             )
         )
-    command.upgrade(config, "head")
+    command.upgrade(config, "heads")
     with engine.begin() as c:
         assert c.execute(text("SELECT count(*) FROM entries")).scalar() == 1
         row = c.execute(text("SELECT starts_on, goal, daily_limit FROM limit_periods")).one()

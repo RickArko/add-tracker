@@ -41,6 +41,21 @@ export function shortDate(isoDate: string): string {
   return localDate(isoDate).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** With the year, for dates that can be well in the past. */
+export function fullDate(isoDate: string): string {
+  return localDate(isoDate).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+export function dayCount(days: number): string {
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** The day before `today` as YYYY-MM-DD, in local time. */
+export function yesterday(today: Date = new Date()): string {
+  const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  return date.toLocaleDateString("en-CA");
+}
+
 export function longDate(date: Date): string {
   return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }

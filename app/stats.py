@@ -8,6 +8,9 @@ Calendar days are always the user's local days. Goal figures, comparisons and ga
 tracker was created. An unlogged day before then isn't a day without use, it just wasn't recorded,
 so one backdated entry (or a mistyped year) can't invent months of flattering zeros. Backdated
 entries still appear on the chart.
+
+The one exception is someone who had already stopped. They give their last day of use once, and
+each day after it counts unless it has a logged use.
 """
 
 import math
@@ -55,6 +58,7 @@ MILESTONES = {
     "urges": [1, 10, 25, 50, 100, 250],
     "within": [1, 7, 14, 30, 60, 100, 200],
     "logged": [3, 7, 14, 30, 60, 100, 200],
+    "stopped": [1, 7, 14, 30, 60, 90, 180, 365, 730, 1095, 1825, 3650],
 }
 
 
@@ -88,10 +92,16 @@ def compute_stats(
     periods: Sequence[PeriodRow] = (),
     plan: PlanRow | None = None,
     confirmed_days: Iterable[date] = (),
+    stopped_on: date | None = None,
 ) -> dict[str, Any]:
     today = now.astimezone(tz).date()
     local_days = [e.occurred_at.astimezone(tz).date() for e in entries]
     first_day = created_at.astimezone(tz).date()
+    tracking_from = created_at
+    if stopped_on is not None:
+        free_from = stopped_on + timedelta(days=1)
+        first_day = min(first_day, free_from)
+        tracking_from = min(created_at, day_bounds(free_from, tz)[0])
     earliest_day = min([first_day, *local_days])
     window_start = max(today - timedelta(days=days - 1), earliest_day)
 
@@ -111,7 +121,7 @@ def compute_stats(
     accounted = set(local_days) | set(confirmed_days)
 
     def counts(day: date) -> bool:
-        return day in accounted or day >= today
+        return day in accounted or day >= today or (stopped_on is not None and day > stopped_on)
 
     def limit_on(day: date) -> float | None:
         """The limit in force that day. Days before any period use the earliest one."""
@@ -197,7 +207,7 @@ def compute_stats(
         }
 
     use_times = sorted(e.occurred_at for e in entries if e.kind == "use")
-    marks = [created_at, *(t for t in use_times if t >= created_at), now]
+    marks = [tracking_from, *(t for t in use_times if t >= tracking_from), now]
 
     def verified(a: datetime, b: datetime) -> bool:
         """A stretch counts only if every whole day inside it is accounted for."""
@@ -219,7 +229,7 @@ def compute_stats(
     unlogged = [
         day
         for day in (today - timedelta(days=i) for i in range(1, 8))
-        if day >= first_day and day not in accounted
+        if day >= first_day and not counts(day) and stopped_on is None
     ]
 
     tracked_days = [first_day + timedelta(days=i) for i in range(max(0, (today - first_day).days))]
@@ -238,6 +248,14 @@ def compute_stats(
         days_logged=len({d for e, d in zip(entries, local_days, strict=True)}),
         today=today,
         now=now,
+        stopped=None
+        if stopped_on is None
+        else _stopped(
+            stopped_on,
+            days_with_use={d for e, d in zip(entries, local_days, strict=True) if e.kind == "use"},
+            urges=sum(n for day, n in urges_by_day.items() if day > stopped_on),
+            today=today,
+        ),
     )
 
     return {
@@ -262,6 +280,29 @@ def compute_stats(
             "unlogged_days": sum(1 for d in daily if not counts(date.fromisoformat(d["date"]))),
         },
         "game": game,
+    }
+
+
+def _stopped(
+    stopped_on: date, *, days_with_use: set[date], urges: int, today: date
+) -> dict[str, Any]:
+    """Finished days since the last use. Today waits until it's over, so a use can't lower them."""
+    days_free = run = longest = 0
+    for offset in range(1, (today - stopped_on).days):
+        if stopped_on + timedelta(days=offset) in days_with_use:
+            run = 0
+        else:
+            run += 1
+            days_free += 1
+            longest = max(longest, run)
+    used_since = sum(day > stopped_on for day in days_with_use)
+    return {
+        "since": stopped_on.isoformat(),
+        "days_free": days_free,
+        "current_days": 0 if today in days_with_use else run,
+        "longest_days": longest,
+        "days_with_use": used_since,
+        "urges": urges,
     }
 
 
@@ -343,6 +384,7 @@ def _game(
     days_logged: int,
     today: date,
     now: datetime,
+    stopped: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     amounts = [amount_by_day.get(day, 0) for day in tracked_days]
 
@@ -390,7 +432,21 @@ def _game(
             today=today,
         )
 
+    milestones = [
+        milestone("gap", longest_gap_hours),
+        milestone("urges", total_urges),
+        milestone("within", within),
+        milestone("logged", days_logged),
+    ]
+    if stopped is not None:
+        # Days within a zero goal would repeat this, and a daily logging count no longer applies.
+        milestones = [
+            milestone("stopped", stopped["longest_days"]),
+            milestone("urges", stopped["urges"]),
+        ]
+
     return {
+        "stopped": stopped,
         "level": level,
         "trend": _trend(tracked_days, amount_by_day, today),
         "records": {
@@ -400,10 +456,5 @@ def _game(
         },
         "typical_gap_hours": typical_gap_hours,
         "unlogged_recent": [day.isoformat() for day in unlogged],
-        "milestones": [
-            milestone("gap", longest_gap_hours),
-            milestone("urges", total_urges),
-            milestone("within", within),
-            milestone("logged", days_logged),
-        ],
+        "milestones": milestones,
     }

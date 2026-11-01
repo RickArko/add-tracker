@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  changeSentence, duration, formatNumber, localDate, niceMax, quantity,
-  tallyGroups, timeSince, toLocalInput, unitLabel,
+  changeSentence, dayCount, duration, formatNumber, fullDate, localDate, niceMax, quantity,
+  tallyGroups, timeSince, toLocalInput, unitLabel, yesterday,
 } from "./format";
 
 describe("units", () => {
@@ -68,5 +68,22 @@ describe("niceMax", () => {
     }
     expect(niceMax(0)).toBe(1);
     expect(niceMax(4.2)).toBe(5);
+  });
+});
+
+describe("already stopped helpers", () => {
+  it("counts days in the right grammar", () => {
+    expect(dayCount(0)).toBe("0 days");
+    expect(dayCount(1)).toBe("1 day");
+    expect(dayCount(407)).toBe("407 days");
+  });
+
+  it("finds the previous local day across a month and a year", () => {
+    expect(yesterday(new Date(2026, 10, 1, 0, 30))).toBe("2026-10-31");
+    expect(yesterday(new Date(2026, 0, 1, 23, 30))).toBe("2025-12-31");
+  });
+
+  it("keeps the year in a full date", () => {
+    expect(fullDate("2025-09-20")).toContain("2025");
   });
 });

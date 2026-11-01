@@ -17,6 +17,7 @@ export interface Tracker {
   step_amount: number | null;
   clear_days: number | null;
   plan_started_on: string | null;
+  stopped_on: string | null;
 }
 
 export interface Level {
@@ -33,7 +34,18 @@ export interface Level {
   zero_by: string | null;
 }
 
+export interface Stopped {
+  since: string;
+  days_free: number;
+  current_days: number;
+  longest_days: number;
+  days_with_use: number;
+  urges: number;
+}
+
 export interface Game {
+  /** Absent from a Today saved on the device by an older version. */
+  stopped?: Stopped | null;
   level: Level | null;
   trend: { per_week: number; days_used: number; zero_by: string | null } | null;
   records: {
