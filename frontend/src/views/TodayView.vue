@@ -4,13 +4,18 @@ import EntryDialog from "../components/EntryDialog.vue";
 import TallyMarks from "../components/TallyMarks.vue";
 import TrackerForm from "../components/TrackerForm.vue";
 import { api, ApiError, timeZone, type Entry, type TodayTracker, type Tracker } from "../lib/api";
-import { formatNumber, longDate, quantity, timeSince, unitLabel } from "../lib/format";
+import { duration, formatNumber, longDate, quantity, shortDate, timeSince, unitLabel } from "../lib/format";
+import {
+  addToCachedToday, cachedToday, cacheToday, cancelQueued, enqueue, flushQueue, isRetryable,
+  removeFromQueue, waitingLogs, withQueue,
+} from "../lib/offline";
 
 const trackers = ref<TodayTracker[]>([]);
 const loaded = ref(false);
 const loadError = ref("");
+const waiting = ref(0);
 const editing = ref<Entry | null>(null);
-const toast = ref<{ text: string; entry?: Entry } | null>(null);
+const toast = ref<{ text: string; entry?: Entry; queuedId?: string } | null>(null);
 const today = ref(new Date());
 let toastTimer: number | undefined;
 // Logs still being sent. A reload during one would overwrite its optimistic count.
@@ -27,50 +32,75 @@ async function load() {
     return;
   }
   today.value = new Date();
+  const refused = await flushQueue();
+  if (refused) showToast(`${refused} waiting ${refused === 1 ? "log was" : "logs were"} refused by the server, so check History.`);
   try {
     const fresh = await api<TodayTracker[]>(`/api/today?tz=${encodeURIComponent(timeZone())}`);
     if (pendingLogs > 0) {
       reloadWhenSettled = true;
       return;
     }
-    trackers.value = fresh;
+    cacheToday(fresh);
+    trackers.value = withQueue(fresh);
     loadError.value = "";
   } catch (e) {
-    loadError.value = e instanceof ApiError ? e.message : "Today's log didn't load.";
+    const saved = isRetryable(e) ? cachedToday() : null;
+    if (saved) {
+      trackers.value = withQueue(saved);
+      loadError.value = "";
+    } else {
+      loadError.value = e instanceof ApiError ? e.message : "Today's log didn't load.";
+    }
   }
+  waiting.value = waitingLogs().length;
   loaded.value = true;
 }
 
-function showToast(text: string, entry?: Entry) {
-  toast.value = { text, entry };
+function showToast(text: string, extra: { entry?: Entry; queuedId?: string } = {}) {
+  toast.value = { text, ...extra };
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => (toast.value = null), 8000);
 }
 
+function adjust(tracker: TodayTracker, kind: "use" | "urge", direction: 1 | -1) {
+  if (kind === "use") {
+    tracker.uses_today += direction;
+    tracker.amount_today += direction * tracker.default_amount;
+  } else {
+    tracker.urges_today += direction;
+  }
+}
+
 async function log(tracker: TodayTracker, kind: "use" | "urge") {
   pendingLogs += 1;
+  const clientId = crypto.randomUUID();
+  const tappedAt = new Date().toISOString();
+  enqueue({ client_id: clientId, tracker_id: tracker.id, kind, occurred_at: tappedAt });
   // Update first, so a tap feels instant even on a slow connection.
-  if (kind === "use") {
-    tracker.uses_today += 1;
-    tracker.amount_today += tracker.default_amount;
-  } else {
-    tracker.urges_today += 1;
-  }
+  adjust(tracker, kind, 1);
   try {
-    const entry = await api<Entry>("/api/entries", "POST", { tracker_id: tracker.id, kind });
+    const entry = await api<Entry>("/api/entries", "POST", {
+      tracker_id: tracker.id,
+      kind,
+      client_id: clientId,
+    });
+    removeFromQueue(clientId);
+    addToCachedToday(entry);
     showToast(
       kind === "use" ? `Logged ${quantity(entry.amount ?? 0, tracker.unit)}` : "Logged urge",
-      entry,
+      { entry },
     );
     if (kind === "use") tracker.last_use_at = entry.occurred_at;
   } catch (e) {
-    if (kind === "use") {
-      tracker.uses_today -= 1;
-      tracker.amount_today -= tracker.default_amount;
+    if (isRetryable(e)) {
+      waiting.value = waitingLogs().length;
+      if (kind === "use") tracker.last_use_at = tappedAt;
+      showToast("Saved on this device. It'll send when you're back online.", { queuedId: clientId });
     } else {
-      tracker.urges_today -= 1;
+      removeFromQueue(clientId);
+      adjust(tracker, kind, -1);
+      showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
     }
-    showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
   } finally {
     pendingLogs -= 1;
     if (pendingLogs === 0 && reloadWhenSettled) {
@@ -91,6 +121,13 @@ async function undo(entry: Entry) {
   }
 }
 
+async function undoQueued(clientId: string) {
+  toast.value = null;
+  cancelQueued(clientId);
+  showToast("Removed");
+  await load();
+}
+
 function openDetails(entry: Entry) {
   toast.value = null;
   editing.value = entry;
@@ -106,6 +143,48 @@ async function created(_tracker: Tracker) {
   await load();
 }
 
+const steppingDown = ref(false);
+const dismissedDays = ref<string[]>([]);
+
+function blankDay(t: TodayTracker): string | null {
+  return t.game.unlogged_recent.find((day) => !dismissedDays.value.includes(`${t.id}:${day}`)) ?? null;
+}
+
+async function confirmNoUse(t: TodayTracker, day: string) {
+  try {
+    await api(
+      `/api/trackers/${t.id}/no-use-days?tz=${encodeURIComponent(timeZone())}`,
+      "POST",
+      { day },
+    );
+    showToast(`${shortDate(day)} saved as a day without use`);
+    await load();
+  } catch (e) {
+    showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
+  }
+}
+
+async function stepDown(tracker: TodayTracker) {
+  if (steppingDown.value) return;
+  steppingDown.value = true;
+  try {
+    const updated = await api<Tracker>(
+      `/api/trackers/${tracker.id}/step-down?tz=${encodeURIComponent(timeZone())}`,
+      "POST",
+    );
+    showToast(
+      updated.daily_limit === null
+        ? "Final level. Your goal is now zero."
+        : `New level. Your limit is ${quantity(updated.daily_limit, tracker.unit)} a day from today.`,
+    );
+    await load();
+  } catch (e) {
+    showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
+  } finally {
+    steppingDown.value = false;
+  }
+}
+
 function limitNote(t: TodayTracker): string {
   if (t.daily_limit === null) return `${quantity(t.amount_today, t.unit)} today`;
   return `${formatNumber(t.amount_today)} of ${quantity(t.daily_limit, t.unit)} today`;
@@ -114,12 +193,15 @@ function limitNote(t: TodayTracker): string {
 const onVisible = () => {
   if (document.visibilityState === "visible") void load();
 };
+const onOnline = () => void load();
 onMounted(() => {
   void load();
   document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("online", onOnline);
 });
 onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("online", onOnline);
   window.clearTimeout(toastTimer);
 });
 </script>
@@ -130,6 +212,9 @@ onBeforeUnmount(() => {
 
     <p v-if="loadError" class="error" role="alert">
       {{ loadError }} <button class="link" type="button" @click="load">Try again</button>
+    </p>
+    <p v-if="waiting" class="waiting" role="status">
+      {{ waiting }} {{ waiting === 1 ? "log" : "logs" }} waiting to send
     </p>
 
     <section v-if="loaded && !trackers.length && !loadError" class="first-run">
@@ -147,8 +232,30 @@ onBeforeUnmount(() => {
         <p class="today-facts">
           <span class="today-total">{{ limitNote(t) }}</span>
           <span v-if="t.urges_today">{{ t.urges_today }} {{ t.urges_today === 1 ? "urge" : "urges" }} without use</span>
-          <span v-if="t.last_use_at">Last logged {{ timeSince(t.last_use_at) }} ago</span>
+          <span v-if="t.last_use_at">Last logged {{ timeSince(t.last_use_at) }} ago<template v-if="t.game.typical_gap_hours !== null">. Typical gap this week: {{ duration(t.game.typical_gap_hours) }}</template></span>
+          <span v-if="t.game.level && !t.game.level.at_zero">
+            Level {{ t.game.level.level }} of {{ t.game.level.total_levels }}, {{ Math.min(t.game.level.days_cleared, t.game.level.clear_days) }} of {{ t.game.level.clear_days }} days cleared
+          </span>
+          <span v-else-if="t.game.level">
+            Level {{ t.game.level.level }} of {{ t.game.level.total_levels }}, {{ t.game.level.days_cleared }} {{ t.game.level.days_cleared === 1 ? "day" : "days" }} at zero
+          </span>
         </p>
+        <button
+          v-if="t.game.level?.ready && t.game.level.next_limit !== null"
+          type="button"
+          class="step-down"
+          :disabled="steppingDown"
+          @click="stepDown(t)"
+        >
+          Level cleared. Step down to {{ quantity(t.game.level.next_limit, t.unit) }} a day
+        </button>
+        <div v-if="blankDay(t)" class="blank-day">
+          <p>{{ shortDate(blankDay(t)!) }} has no logs. Blank days don't count toward progress. Was it a day without use?</p>
+          <div class="actions">
+            <button type="button" class="secondary" @click="confirmNoUse(t, blankDay(t)!)">Yes, no use</button>
+            <button type="button" class="quiet" @click="dismissedDays.push(`${t.id}:${blankDay(t)}`)">No, leave it blank</button>
+          </div>
+        </div>
         <div class="log-actions">
           <button class="log-use" type="button" @click="log(t, 'use')">
             Log {{ formatNumber(t.default_amount) }} {{ unitLabel(t.unit, t.default_amount) }}
@@ -169,6 +276,7 @@ onBeforeUnmount(() => {
         <button type="button" class="link" @click="openDetails(toast.entry)">Add details</button>
         <button type="button" class="link" @click="undo(toast.entry)">Undo</button>
       </template>
+      <button v-else-if="toast.queuedId" type="button" class="link" @click="undoQueued(toast.queuedId!)">Undo</button>
     </div>
 
     <EntryDialog

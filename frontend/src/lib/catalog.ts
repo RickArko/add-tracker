@@ -5,11 +5,14 @@ export interface Preset {
   name: string;
   category: Category;
   unit: string;
+  /** What one tap logs, when that isn't 1. */
+  amount?: number;
 }
 
 export const PRESETS: Preset[] = [
   { label: "Alcohol", name: "Alcohol", category: "alcohol", unit: "drink" },
   { label: "Nicotine", name: "Nicotine", category: "nicotine", unit: "use" },
+  { label: "Nicotine pouches", name: "Nicotine pouches", category: "nicotine", unit: "mg", amount: 6 },
   { label: "Cannabis", name: "Cannabis", category: "cannabis", unit: "session" },
   { label: "Caffeine", name: "Caffeine", category: "caffeine", unit: "cup" },
   { label: "Opioids", name: "Opioids", category: "opioid", unit: "dose" },

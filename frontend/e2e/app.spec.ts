@@ -1,4 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
+import { DatabaseSync } from "node:sqlite";
 import { expect, test, type Page } from "@playwright/test";
 
 const PASSPHRASE = "correct horse battery";
@@ -186,6 +187,218 @@ test("a very long unbroken name doesn't overflow a phone", async ({ browser }) =
   await context.close();
 });
 
+test("nicotine pouches count in mg, with a daily mg limit", async ({ page }) => {
+  await register(page);
+  await page.getByRole("button", { name: "Nicotine pouches" }).click();
+  await expect(page.getByLabel("Count it in")).toHaveValue("mg");
+  await expect(page.getByLabel("Each log counts as (mg)")).toHaveValue("6");
+  await page.getByLabel("Daily limit (mg)").fill("12");
+  await page.getByRole("button", { name: "Start tracking" }).click();
+
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("6 of 12 mg today")).toBeVisible();
+
+  // A different strength is a one-off change to that log.
+  await page.getByRole("button", { name: "Add details" }).click();
+  await page.getByRole("dialog").getByLabel("Amount (mg)").fill("3");
+  await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("3 of 12 mg today")).toBeVisible();
+});
+
+test("changing the unit on another preset updates the limit label", async ({ page }) => {
+  await register(page);
+  await page.getByRole("button", { name: "Alcohol" }).click();
+  await page.getByLabel("Count it in").fill("ml");
+  await expect(page.getByLabel("Daily limit (ml)")).toBeVisible();
+});
+
+async function addZyn(page: Page) {
+  await page.getByRole("button", { name: "Nicotine pouches" }).click();
+  await page.getByLabel("Name").fill("Zyn");
+  await page.getByLabel("Daily limit (mg)").fill("90");
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page.getByText("Zyn").first()).toBeVisible();
+}
+
+test("levels: set up a plan, clear a level, step down, and the past stays as it was", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Set up levels" }).click();
+  await expect(page.getByText("16 levels.")).toBeVisible();
+  await page.getByRole("button", { name: "Save levels" }).click();
+  await expect(page.getByText("Levels on: down 6 mg after 7 days cleared")).toBeVisible();
+
+  await page.goto("/");
+  await expect(page.getByText("Level 1 of 16, 0 of 7 days cleared")).toBeVisible();
+  // Nothing is offered until the level is cleared.
+  await expect(page.getByRole("button", { name: /Step down/ })).toBeHidden();
+
+  // Moves the tracker back eight days with each confirmed, as clearing a level takes a week.
+  const db = new DatabaseSync(process.env.TALLY_E2E_DB!);
+  db.exec(`
+    UPDATE trackers SET created_at = datetime('now', '-9 days'), plan_started_on = date('now', '-8 days');
+    UPDATE limit_periods SET starts_on = date('now', '-8 days');
+  `);
+  const insert = db.prepare("INSERT OR IGNORE INTO no_use_days SELECT id, date('now', ?) FROM trackers");
+  for (let days = 1; days <= 8; days++) insert.run(`-${days} days`);
+  db.close();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Level cleared. Step down to 84 mg a day" }).click();
+  await expect(page.getByText("Your limit is 84 mg a day from today")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("0 of 84 mg today")).toBeVisible();
+  await expect(page.getByText("Level 2 of 16")).toBeVisible();
+
+  await page.getByRole("link", { name: "Trends" }).click();
+  await expect(page.getByRole("heading", { name: "Level 2 of 16" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your records" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Milestones" })).toBeVisible();
+});
+
+test("levels aren't offered where tapering needs a clinician", async ({ page }) => {
+  await register(page);
+  await addAlcohol(page);
+  await page.goto("/settings");
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up levels" })).toBeHidden();
+});
+
+test("logging keeps working with no signal, and sends once when back", async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: "allow" });
+  const page = await context.newPage();
+  await register(page);
+  await addZyn(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Zyn" })).toBeVisible();
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  // One log online, so its assets and today's copy are saved.
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+
+  await context.setOffline(true);
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await expect(page.getByText("12 of 90 mg today")).toBeVisible();
+  await expect(page.getByText("1 log waiting to send")).toBeVisible();
+
+  // A reload with no signal still opens the app, with the count intact.
+  await page.reload();
+  await expect(page.getByText("12 of 90 mg today")).toBeVisible();
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("18 of 90 mg today")).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("12 of 90 mg today")).toBeVisible();
+
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("waiting to send")).toBeHidden();
+  await page.reload();
+  await expect(page.getByText("12 of 90 mg today")).toBeVisible();
+  const entries = await page.evaluate(() => fetch("/api/entries").then((r) => r.json()));
+  expect(entries).toHaveLength(2);
+
+  // Logging out removes what's stored on the device.
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  const left = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("tally.")));
+  expect(left).toEqual([]);
+  await context.close();
+});
+
+test("a lost reply can't double count, because a resend is recognised", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  // The server gets the first attempt, but its reply never arrives.
+  await page.route("**/api/entries", async (route) => {
+    await route.fetch();
+    await route.abort("connectionreset");
+  }, { times: 1 });
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("waiting to send")).toBeHidden();
+  await page.reload();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+});
+
+test("a blank day earns nothing until it's confirmed", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  const db = new DatabaseSync(process.env.TALLY_E2E_DB!);
+  db.exec("UPDATE trackers SET created_at = datetime('now', '-3 days')");
+  db.close();
+  await page.reload();
+  await expect(page.getByText("has no logs.").first()).toBeVisible();
+  await page.getByRole("button", { name: "Yes, no use" }).click();
+  await expect(page.getByText("saved as a day without use")).toBeVisible();
+});
+
+test("a Wi-Fi login page answering for the server doesn't lose a waiting log", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await page.route("**/api/entries", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<h1>Sign in to Wi-Fi</h1>" }),
+  );
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("1 log waiting to send")).toBeVisible();
+  await page.unroute("**/api/entries");
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("waiting to send")).toBeHidden();
+  await page.reload();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+});
+
+test("a log tapped as the session expires is sent after logging back in", async ({ page }) => {
+  const name = await register(page);
+  await addZyn(page);
+  await page.context().clearCookies();
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.getByLabel("Username").fill(name);
+  await page.getByLabel("Passphrase").fill(PASSPHRASE);
+  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+});
+
+test("closing the app while a log is sending doesn't lose it", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  // The request never reaches the server before the page goes away.
+  await page.route("**/api/entries", () => {}, { times: 1 });
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+  const entries = await page.evaluate(() => fetch("/api/entries").then((r) => r.json()));
+  expect(entries).toHaveLength(1);
+});
+
+test("undo after a lost reply really removes the log", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await page.route("**/api/entries", async (route) => {
+    await route.fetch();
+    await route.abort("connectionreset");
+  }, { times: 1 });
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+});
+
 test("exports download and contain my data", async ({ page }) => {
   await register(page);
   await addAlcohol(page);
@@ -248,9 +461,23 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
     await expect(page.getByRole("dialog")).toBeHidden();
 
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Add something to track" }).click();
+    await addZyn(page);
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Set up levels" }).click();
+    await page.getByRole("button", { name: "Save levels" }).click();
+    await expect(page.getByText("Levels on:")).toBeVisible();
+
     for (const path of ["/", "/trends", "/history", "/settings", "/help"]) {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
+      if (path === "/trends") {
+        await page.getByRole("button", { name: "Zyn" }).click();
+        await expect(page.locator(".level-panel")).toBeVisible();
+      }
+      if (path === "/trends") await page.getByRole("button", { name: "Zyn" }).click();
+      if (path === "/trends") await expect(page.locator(".level-panel")).toBeVisible();
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
       expect(results.violations.map((v) => `${path}: ${v.id} ${v.nodes[0].html}`)).toEqual([]);
       const overflow = await page.evaluate(

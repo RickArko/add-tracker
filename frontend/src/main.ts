@@ -12,3 +12,8 @@ setUnauthorizedHandler(() => {
 });
 
 createApp(App).use(router).mount("#app");
+
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  // Offline support is a bonus, so a failed registration shouldn't surface as an error.
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}

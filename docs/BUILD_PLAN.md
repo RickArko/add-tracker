@@ -13,12 +13,26 @@ A working app one person can start using today to log consumption or a habit and
 | Principle | What it means in the product |
 |---|---|
 | Self-monitoring is itself an intervention, but only if it's kept up | Logging takes one tap. Details are optional and offered after the log. |
-| Shame drives under-reporting and dropping out, and a slip can turn into giving up (the abstinence violation effect) | Neutral wording, with no red, no scores and no streak that resets to zero. Trends show "days within your limit" and "longest stretch", which a slip can't erase. |
+| Shame drives under-reporting and dropping out, and a slip can turn into giving up (the abstinence violation effect) | Neutral wording, with no red, no points and no streak that resets to zero. Trends show "days within your limit" and "longest stretch", which a slip can't erase. |
 | Moderation and harm reduction are valid goals | Four goals: cut back, stop, stay within a limit, or just watch. |
 | Getting through an urge is a skill worth noticing | "Had an urge, didn't use" is as easy to log as a use, and is counted separately. |
 | Triggers and timing are what people can act on | Craving strength (0 to 10), trigger, and a day-by-time view. |
 | Some withdrawal is dangerous | Alcohol and benzodiazepines warn about seizures, and opioids warn about lost tolerance, before the person commits to a goal. A support page is reachable without logging in. |
 | The app isn't a clinician | No dosing advice. Limits are labelled as the user's own and not as safe levels. |
+
+### Game rules
+
+The game is for an analytical person who wants to play against their own numbers. Each rule is there to stop the game harming the person using it.
+
+| Rule | Why |
+|---|---|
+| Logging a day is always better than leaving it blank. Logging is itself a milestone. | A score that falls when you log rewards not logging, and that makes the data worthless. |
+| Cleared days add up instead of needing to be in a row | Streak resets feed "I've blown it, so why stop now" |
+| The user chooses when to step down, and it's never automatic | Pace stays with the person. A forecast is an estimate, not a deadline. |
+| A finished day counts only if it has a log or is confirmed as no use | Otherwise skipping logs would earn progress. Now it earns nothing, and adding a forgotten log to a blank day can't lower level progress or banked amounts. |
+| A hard day never subtracts from a level, banked amount or record | A hard day can delay progress but can't take it away. Correcting a day that was already logged can change its figures, because accuracy comes first. |
+| No points, leaderboards, sharing, or daily-return rewards | These reward using the app rather than using less, and could add a compulsion |
+| No levels for alcohol, benzodiazepines or opioids, enforced on the server | Tapering these safely needs a clinician |
 
 ### Functional requirements
 
@@ -32,6 +46,10 @@ A working app one person can start using today to log consumption or a habit and
 | F6 | History, filterable by tracker, with paging | `test_data.py`, e2e core loop |
 | F7 | Hide or delete a tracker | `test_data.py`, e2e settings |
 | F8 | Support page and safety notes | e2e logged-out and core loop |
+| F9 | Levels: a self-set taper in steps, moved through only when the user chooses | `test_levels.py`, e2e levels |
+| F10 | Records and milestones that a hard day can't remove | `test_levels.py` |
+| F11 | Limit and goal history, so changing either doesn't rewrite past days | `test_levels.py` |
+| F12 | Logging with no signal, sent once when back online | `test_levels.py`, e2e offline and lost reply |
 
 ### Correctness rules
 
@@ -91,6 +109,7 @@ Each phase has one owner agent and a gate that must pass before the next one sta
 | 3. Integration | Browser tests against the built app | Playwright passes, including axe and overflow checks | Done |
 | 4. Design review | Screenshots of each screen, phone and desktop, light and dark | Reviewed by eye and fixes applied | Done |
 | 5. Independent review | A fresh agent with no build context reviews security and correctness | Confirmed findings fixed, with regression tests | Done |
+| 5b. Levels and offline | Game rules, limit history, offline queue | Tests above pass; second independent review; confirmed findings fixed | Done |
 | 6. Packaging | Dockerfile, `fly.toml`, scripts, README | Container builds and passes a smoke test | Done |
 
 ### Running this on later work
@@ -105,7 +124,6 @@ Each phase has one owner agent and a gate that must pass before the next one sta
 
 ### Phase 1: daily use (next)
 - Reminders the user opts into
-- Installable offline logging that queues when there's no signal
 - Import from the JSON export
 - Scheduled encrypted backups of the database
 - A money or time saved figure

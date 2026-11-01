@@ -13,6 +13,37 @@ export interface Tracker {
   daily_limit: number | null;
   created_at: string;
   archived_at: string | null;
+  baseline_amount: number | null;
+  step_amount: number | null;
+  clear_days: number | null;
+  plan_started_on: string | null;
+}
+
+export interface Level {
+  level: number;
+  total_levels: number;
+  limit: number;
+  next_limit: number | null;
+  days_cleared: number;
+  clear_days: number;
+  ready: boolean;
+  at_zero: boolean;
+  banked: number;
+  baseline: number;
+  zero_by: string | null;
+}
+
+export interface Game {
+  level: Level | null;
+  trend: { per_week: number; days_used: number; zero_by: string | null } | null;
+  records: {
+    lowest_day: { amount: number; date: string } | null;
+    lowest_week: { amount: number; ending: string } | null;
+    longest_gap_hours: number;
+  };
+  typical_gap_hours: number | null;
+  unlogged_recent: string[];
+  milestones: { key: string; value: number; earned: number; total: number; next: number | null }[];
 }
 
 export interface TodayTracker extends Tracker {
@@ -20,6 +51,7 @@ export interface TodayTracker extends Tracker {
   amount_today: number;
   urges_today: number;
   last_use_at: string | null;
+  game: Game;
 }
 
 export interface Entry {
@@ -38,10 +70,12 @@ export interface DayStat {
   amount: number;
   uses: number;
   urges: number;
-  average_7d: number;
+  average_7d: number | null;
+  limit: number | null;
 }
 
 export interface Stats {
+  game: Game;
   window_start: string;
   daily: DayStat[];
   heatmap: number[][];
@@ -57,11 +91,13 @@ export interface Stats {
     within_goal: { days: number; of: number; limit: number } | null;
     last_use_at: string | null;
     longest_gap_hours: number | null;
+    unlogged_days: number;
   };
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  /** `fromApp` is false when a captive portal or proxy answered instead of this server. */
+  constructor(public status: number, message: string, public fromApp = false) {
     super(message);
   }
 }
@@ -91,14 +127,24 @@ export async function api<T = void>(path: string, method = "GET", body?: unknown
       credentials: "same-origin",
       headers: body === undefined ? undefined : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     throw new ApiError(0, "Can't reach the server. Check your connection and try again.");
   }
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    if (res.status === 401 && !path.startsWith("/api/auth/login")) onUnauthorized();
-    throw new ApiError(res.status, errorMessage(payload.detail));
+  const text = await res.text().catch(() => "");
+  let payload: { detail?: unknown } | null = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
   }
-  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  if (!res.ok) {
+    if (res.status === 401 && !path.startsWith("/api/auth/login")) onUnauthorized();
+    throw new ApiError(res.status, errorMessage(payload?.detail), payload?.detail !== undefined);
+  }
+  if (res.status === 204) return undefined as T;
+  // A 200 that isn't JSON came from something between here and the server, such as a Wi-Fi login.
+  if (payload === null) throw new ApiError(0, "Can't reach the server. Check your connection and try again.");
+  return payload as T;
 }

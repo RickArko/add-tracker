@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import PlanForm from "../components/PlanForm.vue";
 import TrackerForm from "../components/TrackerForm.vue";
 import { api, ApiError, type Tracker } from "../lib/api";
 import { auth, loadAuth } from "../lib/auth";
 import { goalLabel } from "../lib/catalog";
 import { quantity } from "../lib/format";
+import { clearLocalData, flushQueue, getQueue } from "../lib/offline";
 
 const router = useRouter();
 const trackers = ref<Tracker[]>([]);
 const adding = ref(false);
+const planFor = ref<number | null>(null);
+const NO_LEVELS = ["alcohol", "benzodiazepine", "opioid"];
 const editingId = ref<number | null>(null);
 const confirmDelete = ref<number | null>(null);
 const error = ref("");
@@ -37,7 +41,18 @@ async function load() {
 async function saved() {
   adding.value = false;
   editingId.value = null;
+  planFor.value = null;
   await load();
+}
+
+async function removePlan(tracker: Tracker) {
+  error.value = "";
+  try {
+    await api(`/api/trackers/${tracker.id}/plan`, "DELETE");
+    await load();
+  } catch (e) {
+    error.value = message(e, "That didn't save. Try again.");
+  }
 }
 
 async function setArchived(tracker: Tracker, archived: boolean) {
@@ -80,12 +95,19 @@ async function changePassword() {
 async function logout() {
   error.value = "";
   try {
+    await flushQueue();
+    if (getQueue().length) {
+      error.value = "Some logs are still waiting to send. Reconnect before you log out, so they aren't lost.";
+      window.scrollTo(0, 0);
+      return;
+    }
     await api("/api/auth/logout", "POST");
   } catch (e) {
     error.value = message(e, "You're still logged in. Try again.");
     window.scrollTo(0, 0);
     return;
   }
+  clearLocalData();
   auth.username = null;
   await loadAuth().catch(() => {});
   await router.push("/login");
@@ -95,6 +117,7 @@ async function deleteAccount() {
   deleteError.value = "";
   try {
     await api("/api/auth/account", "DELETE", { password: deletePassword.value });
+    clearLocalData();
     auth.username = null;
     await loadAuth().catch(() => {});
     await router.push("/login");
@@ -123,9 +146,12 @@ onMounted(load);
               <small v-else>
                 {{ goalLabel(t.goal) }}<template v-if="t.daily_limit !== null">, limit {{ quantity(t.daily_limit, t.unit) }} a day</template>
               </small>
+              <small v-if="t.step_amount">Levels on: down {{ quantity(t.step_amount, t.unit) }} after {{ t.clear_days }} days cleared</small>
             </div>
             <div class="row-actions">
               <button type="button" class="quiet" @click="editingId = t.id">Edit</button>
+              <button v-if="!NO_LEVELS.includes(t.category)" type="button" class="quiet" @click="planFor = t.id">{{ t.step_amount ? "Change levels" : "Set up levels" }}</button>
+              <button v-if="t.step_amount" type="button" class="quiet" @click="removePlan(t)">Turn off levels</button>
               <button v-if="t.archived_at" type="button" class="quiet" @click="setArchived(t, false)">Show on Today</button>
               <button v-else type="button" class="quiet" @click="setArchived(t, true)">Hide</button>
               <button v-if="confirmDelete !== t.id" type="button" class="quiet" @click="confirmDelete = t.id">Delete</button>
@@ -135,6 +161,9 @@ onMounted(load);
               </template>
             </div>
           </template>
+          <div v-if="planFor === t.id" class="tracker-plan">
+            <PlanForm :tracker="t" @saved="saved" @cancel="planFor = null" />
+          </div>
         </li>
       </ul>
       <TrackerForm v-if="adding" @saved="saved" />

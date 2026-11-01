@@ -1,6 +1,14 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.db import UTCDateTime
@@ -41,6 +49,10 @@ class Tracker(Base):
     daily_limit: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     archived_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    baseline_amount: Mapped[float | None] = mapped_column(Float)
+    step_amount: Mapped[float | None] = mapped_column(Float)
+    clear_days: Mapped[int | None] = mapped_column(Integer)
+    plan_started_on: Mapped[str | None] = mapped_column(String(10))
 
     entries: Mapped[list["Entry"]] = relationship(
         back_populates="tracker", cascade="all, delete-orphan", passive_deletes=True
@@ -57,6 +69,7 @@ class Entry(Base):
         ),
         CheckConstraint("craving IS NULL OR craving BETWEEN 0 AND 10", name="ck_entries_craving"),
         Index("ix_entries_tracker_occurred", "tracker_id", "occurred_at"),
+        Index("ix_entries_tracker_client", "tracker_id", "client_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -67,5 +80,33 @@ class Entry(Base):
     craving: Mapped[int | None] = mapped_column(Integer)
     trigger: Mapped[str | None] = mapped_column(String(40))
     note: Mapped[str | None] = mapped_column(String(1000))
+    # Set by the device, so resending a log whose reply was lost can't count it twice.
+    client_id: Mapped[str | None] = mapped_column(String(64))
 
     tracker: Mapped[Tracker] = relationship(back_populates="entries")
+
+
+class LimitPeriod(Base):
+    """A goal and limit from a local calendar day on, so changing them can't rewrite the past."""
+
+    __tablename__ = "limit_periods"
+    __table_args__ = (
+        UniqueConstraint("tracker_id", "starts_on", name="uq_limit_periods_tracker_day"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tracker_id: Mapped[int] = mapped_column(ForeignKey("trackers.id", ondelete="CASCADE"))
+    starts_on: Mapped[str] = mapped_column(String(10))
+    goal: Mapped[str] = mapped_column(String(10))
+    daily_limit: Mapped[float | None] = mapped_column(Float)
+
+
+class NoUseDay(Base):
+    """A finished day confirmed as having no use. A blank day otherwise earns nothing."""
+
+    __tablename__ = "no_use_days"
+
+    tracker_id: Mapped[int] = mapped_column(
+        ForeignKey("trackers.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)

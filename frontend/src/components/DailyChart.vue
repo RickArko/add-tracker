@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { DayStat } from "../lib/api";
 import { formatNumber, niceMax, quantity, shortDate } from "../lib/format";
 
-const props = defineProps<{ daily: DayStat[]; unit: string; limit: number | null }>();
+const props = defineProps<{ daily: DayStat[]; unit: string }>();
 
 const host = ref<HTMLElement>();
 const width = ref(640);
@@ -21,7 +21,7 @@ onBeforeUnmount(() => observer?.disconnect());
 const plotW = computed(() => width.value - M.left - M.right);
 const plotH = HEIGHT - M.top - M.bottom;
 const yMax = computed(() =>
-  niceMax(Math.max(1, props.limit ?? 0, ...props.daily.flatMap((d) => [d.amount, d.average_7d]))),
+  niceMax(Math.max(1, ...props.daily.flatMap((d) => [d.amount, d.average_7d ?? 0, d.limit ?? 0]))),
 );
 const y = (value: number) => M.top + plotH - (value / yMax.value) * plotH;
 const slot = computed(() => plotW.value / Math.max(1, props.daily.length));
@@ -41,9 +41,34 @@ function barPath(i: number, amount: number) {
 const bars = computed(() =>
   props.daily.flatMap((d, i) => (d.amount > 0 ? [{ i, d: barPath(i, d.amount) }] : [])),
 );
-const averageLine = computed(() =>
-  props.daily.map((d, i) => `${i ? "L" : "M"}${cx(i)} ${y(d.average_7d)}`).join(" "),
-);
+const averageLine = computed(() => {
+  let path = "";
+  let drawing = false;
+  props.daily.forEach((d, i) => {
+    if (d.average_7d === null) {
+      drawing = false;
+      return;
+    }
+    path += `${drawing ? "L" : "M"}${cx(i)} ${y(d.average_7d)} `;
+    drawing = true;
+  });
+  return path;
+});
+// A stepped line, because each past day keeps the limit it had at the time.
+const limitLine = computed(() => {
+  let path = "";
+  let previous: number | null = null;
+  props.daily.forEach((d, i) => {
+    const left = M.left + slot.value * i;
+    if (d.limit === null) {
+      previous = null;
+      return;
+    }
+    path += `${previous === null ? "M" : "L"}${left} ${y(d.limit)} L${left + slot.value} ${y(d.limit)} `;
+    previous = d.limit;
+  });
+  return path;
+});
 const xLabels = computed(() => {
   const n = props.daily.length;
   const picks = n <= 1 ? [0] : n <= 7 ? [0, n - 1] : [0, Math.floor((n - 1) / 2), n - 1];
@@ -85,7 +110,7 @@ const summary = computed(() => {
   <div class="legend" aria-hidden="true">
     <span><i class="swatch bar"></i>Each day</span>
     <span><i class="swatch line"></i>7-day average</span>
-    <span v-if="limit !== null"><i class="swatch limit"></i>Your limit</span>
+    <span v-if="limitLine"><i class="swatch limit"></i>Your limit</span>
   </div>
   <div ref="host" class="chart">
     <svg
@@ -108,7 +133,7 @@ const summary = computed(() => {
       </g>
       <rect v-if="active !== null" class="band" :x="cx(active) - slot / 2" :y="M.top" :width="slot" :height="plotH" />
       <path v-for="bar in bars" :key="bar.i" :d="bar.d" class="bar" />
-      <line v-if="limit !== null" class="limit" :x1="M.left" :x2="width - M.right" :y1="y(limit)" :y2="y(limit)" />
+      <path v-if="limitLine" class="limit" :d="limitLine" />
       <path :d="averageLine" class="average" />
       <g class="x-axis">
         <text
@@ -125,7 +150,8 @@ const summary = computed(() => {
     <div v-if="tip" class="tip" :style="tip.style" role="status">
       <strong>{{ shortDate(tip.d.date) }}</strong>
       <span>{{ quantity(tip.d.amount, unit) }}</span>
-      <span>7-day average {{ formatNumber(tip.d.average_7d) }}</span>
+      <span v-if="tip.d.average_7d !== null">7-day average {{ formatNumber(tip.d.average_7d) }}</span>
+      <span v-if="tip.d.limit !== null">Limit that day {{ formatNumber(tip.d.limit) }}</span>
       <span v-if="tip.d.urges">{{ tip.d.urges }} {{ tip.d.urges === 1 ? "urge" : "urges" }} without use</span>
     </div>
   </div>

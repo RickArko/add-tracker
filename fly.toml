@@ -1,5 +1,4 @@
-# Set your own unique app name, or let `fly launch --no-deploy --copy-config` choose one.
-app = "tally-CHANGE-ME"
+app = "tally-d469c8"
 primary_region = "iad"
 
 [build]

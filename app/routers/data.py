@@ -1,29 +1,42 @@
 import csv
 import io
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db import now_utc
-from app.models import Entry, Tracker, User
+from app.models import Entry, LimitPeriod, NoUseDay, Tracker, User
 from app.schemas import (
     EntryCreate,
     EntryOut,
     EntryUpdate,
+    NoUseBody,
+    PlanBody,
     TodayTracker,
     TrackerCreate,
     TrackerOut,
     TrackerUpdate,
 )
 from app.security import current_user, get_db
-from app.stats import EntryRow, compute_stats, day_bounds
+from app.stats import (
+    EntryRow,
+    PeriodRow,
+    PlanRow,
+    compute_stats,
+    day_bounds,
+    next_level_limit,
+)
 
 router = APIRouter(prefix="/api", tags=["data"])
+
+# Tapering these can be dangerous, so the app never sets a pace for them.
+CLINICIAN_ONLY_TAPER = {"alcohol", "benzodiazepine", "opioid"}
 
 # Tolerates clock skew between device and server, while still catching mistaken future dates.
 FUTURE_TOLERANCE = timedelta(minutes=5)
@@ -59,6 +72,90 @@ def _check_entry_time(when: datetime) -> None:
         raise HTTPException(status_code=422, detail="Time can't be in the future.")
 
 
+def _local_today(tz: ZoneInfo) -> str:
+    return now_utc().astimezone(tz).date().isoformat()
+
+
+def _record_period(db: Session, tracker: Tracker, tz: ZoneInfo) -> bool:
+    """Notes a new limit from today on. Returns whether the limit in force changed.
+
+    Goal changes that leave the limit alone are stored on the latest period, so they don't
+    restart progress on a level.
+    """
+    db.flush()
+    effective = 0.0 if tracker.goal == "quit" else tracker.daily_limit
+    recent = db.scalars(
+        select(LimitPeriod)
+        .where(LimitPeriod.tracker_id == tracker.id)
+        .order_by(LimitPeriod.starts_on.desc())
+        .limit(2)
+    ).all()
+    latest = recent[0] if recent else None
+    today = _local_today(tz)
+    if latest is not None:
+        previous = 0.0 if latest.goal == "quit" else latest.daily_limit
+        if previous == effective:
+            latest.goal = tracker.goal
+            return False
+        if latest.starts_on >= today:
+            # Going back to the earlier limit the same day undoes a mistake, so progress at
+            # that limit carries on as though the change never happened.
+            if len(recent) == 2:
+                before = recent[1]
+                if (0.0 if before.goal == "quit" else before.daily_limit) == effective:
+                    before.goal = tracker.goal
+                    db.delete(latest)
+                    return True
+            latest.goal, latest.daily_limit = tracker.goal, tracker.daily_limit
+            return True
+    db.add(
+        LimitPeriod(
+            tracker_id=tracker.id,
+            starts_on=today,
+            goal=tracker.goal,
+            daily_limit=tracker.daily_limit,
+        )
+    )
+    return True
+
+
+def _stats_for(db: Session, tracker: Tracker, days: int, tz: ZoneInfo) -> dict:
+    rows = db.execute(
+        select(Entry.kind, Entry.occurred_at, Entry.amount, Entry.craving, Entry.trigger).where(
+            Entry.tracker_id == tracker.id
+        )
+    ).all()
+    periods = db.scalars(select(LimitPeriod).where(LimitPeriod.tracker_id == tracker.id)).all()
+    confirmed = db.scalars(select(NoUseDay.day).where(NoUseDay.tracker_id == tracker.id)).all()
+    plan = _plan_row(tracker)
+    return compute_stats(
+        goal=tracker.goal,
+        daily_limit=tracker.daily_limit,
+        created_at=tracker.created_at,
+        entries=[EntryRow(*row) for row in rows],
+        days=days,
+        tz=tz,
+        now=now_utc(),
+        periods=[
+            PeriodRow(date.fromisoformat(p.starts_on), p.goal, p.daily_limit) for p in periods
+        ],
+        plan=plan,
+        confirmed_days=[date.fromisoformat(day) for day in confirmed],
+    )
+
+
+def _plan_row(tracker: Tracker) -> PlanRow | None:
+    plan = None
+    if tracker.step_amount and tracker.baseline_amount and tracker.plan_started_on:
+        plan = PlanRow(
+            baseline=tracker.baseline_amount,
+            step=tracker.step_amount,
+            clear_days=tracker.clear_days or 7,
+            started_on=date.fromisoformat(tracker.plan_started_on),
+        )
+    return plan
+
+
 # --- Trackers ---
 
 
@@ -76,13 +173,17 @@ def list_trackers(
 
 @router.post("/trackers", status_code=201)
 def create_tracker(
-    body: TrackerCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
+    body: TrackerCreate,
+    tz: ZoneInfo = Depends(parse_tz),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
 ) -> TrackerOut:
     values = body.model_dump()
     if values["goal"] == "quit":
         values["daily_limit"] = None
     tracker = Tracker(user_id=user.id, created_at=now_utc(), **values)
     db.add(tracker)
+    _record_period(db, tracker, tz)
     db.commit()
     return tracker
 
@@ -91,6 +192,7 @@ def create_tracker(
 def update_tracker(
     tracker_id: DbId,
     body: TrackerUpdate,
+    tz: ZoneInfo = Depends(parse_tz),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> TrackerOut:
@@ -106,6 +208,79 @@ def update_tracker(
         setattr(tracker, field, value)
     if tracker.goal == "quit":
         tracker.daily_limit = None
+    if tracker.step_amount and tracker.category in CLINICIAN_ONLY_TAPER:
+        _clear_plan(tracker)
+    _record_period(db, tracker, tz)
+    db.commit()
+    return tracker
+
+
+def _clear_plan(tracker: Tracker) -> None:
+    tracker.baseline_amount = tracker.step_amount = tracker.clear_days = None
+    tracker.plan_started_on = None
+
+
+@router.put("/trackers/{tracker_id}/plan")
+def set_plan(
+    tracker_id: DbId,
+    body: PlanBody,
+    tz: ZoneInfo = Depends(parse_tz),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> TrackerOut:
+    tracker = _owned_tracker(db, user, tracker_id)
+    if tracker.category in CLINICIAN_ONLY_TAPER:
+        raise HTTPException(
+            status_code=422,
+            detail="Levels aren't available for this, because tapering it needs a clinician.",
+        )
+    if body.step_amount > body.baseline_amount:
+        raise HTTPException(status_code=422, detail="Each step must be smaller than your start.")
+    tracker.baseline_amount = body.baseline_amount
+    tracker.step_amount = body.step_amount
+    tracker.clear_days = body.clear_days
+    # Changing a plan keeps its start, so tuning the pace doesn't wipe what's banked.
+    tracker.plan_started_on = tracker.plan_started_on or _local_today(tz)
+    if tracker.daily_limit is None or tracker.daily_limit > body.baseline_amount:
+        tracker.daily_limit = body.baseline_amount
+    if tracker.goal == "quit":
+        tracker.daily_limit = body.baseline_amount
+    tracker.goal = "reduce"
+    _record_period(db, tracker, tz)
+    db.commit()
+    return tracker
+
+
+@router.delete("/trackers/{tracker_id}/plan")
+def remove_plan(
+    tracker_id: DbId, user: User = Depends(current_user), db: Session = Depends(get_db)
+) -> TrackerOut:
+    tracker = _owned_tracker(db, user, tracker_id)
+    _clear_plan(tracker)
+    db.commit()
+    return tracker
+
+
+@router.post("/trackers/{tracker_id}/step-down")
+def step_down(
+    tracker_id: DbId,
+    tz: ZoneInfo = Depends(parse_tz),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> TrackerOut:
+    tracker = _owned_tracker(db, user, tracker_id)
+    plan = _plan_row(tracker)
+    if plan is None or not tracker.daily_limit:
+        raise HTTPException(status_code=422, detail="There's no lower level to move to.")
+    # Also stops a double tap from dropping two levels. A limit can still be lowered in Settings.
+    if not _stats_for(db, tracker, 7, tz)["game"]["level"]["ready"]:
+        raise HTTPException(status_code=422, detail="This level isn't cleared yet.")
+    next_limit = next_level_limit(tracker.daily_limit, plan)
+    if next_limit == 0:
+        tracker.goal, tracker.daily_limit = "quit", None
+    else:
+        tracker.goal, tracker.daily_limit = "reduce", next_limit
+    _record_period(db, tracker, tz)
     db.commit()
     return tracker
 
@@ -115,6 +290,35 @@ def delete_tracker(
     tracker_id: DbId, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> None:
     db.delete(_owned_tracker(db, user, tracker_id))
+    db.commit()
+
+
+@router.post("/trackers/{tracker_id}/no-use-days", status_code=204)
+def confirm_no_use(
+    tracker_id: DbId,
+    body: NoUseBody,
+    tz: ZoneInfo = Depends(parse_tz),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    tracker = _owned_tracker(db, user, tracker_id)
+    day = body.day.isoformat()
+    if day >= _local_today(tz):
+        raise HTTPException(status_code=422, detail="Only a finished day can be confirmed.")
+    start, end = day_bounds(body.day, tz)
+    used = db.scalar(
+        select(func.count())
+        .select_from(Entry)
+        .where(
+            Entry.tracker_id == tracker.id,
+            Entry.kind == "use",
+            Entry.occurred_at >= start,
+            Entry.occurred_at < end,
+        )
+    )
+    if used:
+        raise HTTPException(status_code=422, detail="That day already has a logged use.")
+    db.merge(NoUseDay(tracker_id=tracker.id, day=day))
     db.commit()
 
 
@@ -155,6 +359,7 @@ def today(
             amount_today=round(by_key.get((t.id, "use"), (0, 0))[1], 3),
             urges_today=by_key.get((t.id, "urge"), (0, 0))[0],
             last_use_at=last_uses.get(t.id),
+            game=_stats_for(db, t, 7, tz)["game"],
         )
         for t in trackers
     ]
@@ -189,6 +394,10 @@ def create_entry(
     body: EntryCreate, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> EntryOut:
     tracker = _owned_tracker(db, user, body.tracker_id)
+    if body.client_id:
+        existing = _by_client_id(db, tracker.id, body.client_id)
+        if existing is not None:
+            return existing
     occurred_at = body.occurred_at or now_utc()
     _check_entry_time(occurred_at)
     amount = None
@@ -203,10 +412,21 @@ def create_entry(
         craving=body.craving,
         trigger=body.trigger or None,
         note=body.note or None,
+        client_id=body.client_id,
     )
     db.add(entry)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return _by_client_id(db, tracker.id, body.client_id)
     return entry
+
+
+def _by_client_id(db: Session, tracker_id: int, client_id: str | None) -> Entry | None:
+    return db.scalar(
+        select(Entry).where(Entry.tracker_id == tracker_id, Entry.client_id == client_id)
+    )
 
 
 @router.patch("/entries/{entry_id}")
@@ -231,6 +451,21 @@ def update_entry(
     return entry
 
 
+@router.delete("/entries/by-client/{client_id}", status_code=204)
+def delete_entry_by_client(
+    client_id: Annotated[str, Path(min_length=8, max_length=64)],
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Undo for a log whose reply was lost. Succeeds whether or not the log ever arrived."""
+    entry = db.scalar(
+        select(Entry).join(Tracker).where(Entry.client_id == client_id, Tracker.user_id == user.id)
+    )
+    if entry is not None:
+        db.delete(entry)
+        db.commit()
+
+
 @router.delete("/entries/{entry_id}", status_code=204)
 def delete_entry(
     entry_id: DbId, user: User = Depends(current_user), db: Session = Depends(get_db)
@@ -251,20 +486,7 @@ def tracker_stats(
     db: Session = Depends(get_db),
 ) -> dict:
     tracker = _owned_tracker(db, user, tracker_id)
-    rows = db.execute(
-        select(Entry.kind, Entry.occurred_at, Entry.amount, Entry.craving, Entry.trigger).where(
-            Entry.tracker_id == tracker.id
-        )
-    ).all()
-    return compute_stats(
-        goal=tracker.goal,
-        daily_limit=tracker.daily_limit,
-        created_at=tracker.created_at,
-        entries=[EntryRow(*row) for row in rows],
-        days=days,
-        tz=tz,
-        now=now_utc(),
-    )
+    return _stats_for(db, tracker, days, tz)
 
 
 # --- Export ---
@@ -320,6 +542,19 @@ def export_json(user: User = Depends(current_user), db: Session = Depends(get_db
         "exported_at": now_utc().isoformat(),
         "username": user.username,
         "trackers": [TrackerOut.model_validate(t).model_dump(mode="json") for t in trackers],
+        "limit_history": [
+            {
+                "tracker_id": p.tracker_id,
+                "starts_on": p.starts_on,
+                "goal": p.goal,
+                "daily_limit": p.daily_limit,
+            }
+            for p in db.scalars(
+                select(LimitPeriod)
+                .where(LimitPeriod.tracker_id.in_([t.id for t in trackers]))
+                .order_by(LimitPeriod.tracker_id, LimitPeriod.starts_on)
+            )
+        ],
         "entries": [
             EntryOut.model_validate(e).model_dump(mode="json") for e, _t in _export_rows(db, user)
         ],

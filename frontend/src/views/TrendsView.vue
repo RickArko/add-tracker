@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import DailyChart from "../components/DailyChart.vue";
+import GamePanel from "../components/GamePanel.vue";
 import HeatGrid from "../components/HeatGrid.vue";
 import { api, ApiError, timeZone, type Stats, type Tracker } from "../lib/api";
-import { changeSentence, duration, formatNumber, quantity, shortDate, timeSince } from "../lib/format";
+import { changeSentence, formatNumber, quantity, shortDate, timeSince } from "../lib/format";
 
 const trackers = ref<Tracker[]>([]);
 const trackerId = ref<number | null>(null);
@@ -100,6 +101,8 @@ onMounted(async () => {
       </div>
 
       <template v-if="stats && summary && tracker">
+        <GamePanel :game="stats.game" :tracker="tracker" />
+
         <dl class="facts">
           <div v-if="weekLine">
             <dt>Last 7 full days</dt>
@@ -109,12 +112,8 @@ onMounted(async () => {
             <dt>Time since last logged</dt>
             <dd>{{ summary.last_use_at ? timeSince(summary.last_use_at) : "Nothing logged yet" }}</dd>
           </div>
-          <div v-if="summary.longest_gap_hours !== null">
-            <dt>Longest stretch without use</dt>
-            <dd>{{ duration(summary.longest_gap_hours) }}</dd>
-          </div>
           <div v-if="summary.within_goal && summary.within_goal.of > 0">
-            <dt>{{ tracker.goal === "quit" ? "Days without use" : "Days within your limit" }}</dt>
+            <dt>Days within your goal</dt>
             <dd>{{ summary.within_goal.days }} of {{ summary.within_goal.of }}</dd>
           </div>
           <div>
@@ -129,10 +128,14 @@ onMounted(async () => {
           </div>
         </dl>
 
+        <p v-if="summary.unlogged_days" class="section-note">
+          {{ summary.unlogged_days }} {{ summary.unlogged_days === 1 ? "day has" : "days have" }} no logs in this period. They show as empty and don't count toward goals, records or levels.
+        </p>
+
         <section>
           <h2>Use per day</h2>
           <p class="section-note">{{ quantity(summary.amount_in_window, tracker.unit) }} since {{ shortDate(stats.window_start) }}</p>
-          <DailyChart :daily="stats.daily" :unit="tracker.unit" :limit="summary.within_goal?.limit ?? null" />
+          <DailyChart :daily="stats.daily" :unit="tracker.unit" />
           <details class="table-view">
             <summary>Show as a table</summary>
             <div class="table-scroll">
@@ -146,7 +149,7 @@ onMounted(async () => {
                     <td>{{ formatNumber(d.amount) }}</td>
                     <td>{{ d.uses }}</td>
                     <td>{{ d.urges }}</td>
-                    <td>{{ formatNumber(d.average_7d) }}</td>
+                    <td>{{ d.average_7d === null ? "No data" : formatNumber(d.average_7d) }}</td>
                   </tr>
                 </tbody>
               </table>

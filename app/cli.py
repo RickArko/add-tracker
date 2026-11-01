@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.config import load_settings
 from app.db import make_engine, now_utc, run_migrations
-from app.models import AuthSession, Entry, Tracker, User
+from app.models import AuthSession, Entry, LimitPeriod, Tracker, User
 from app.security import hash_password
 
 DEMO_USER = "demo"
@@ -68,6 +68,27 @@ def seed_demo(session: Session) -> None:
         )
         session.add(tracker)
         session.flush()
+        if category == "nicotine":
+            tracker.baseline_amount, tracker.step_amount, tracker.clear_days = 14.0, 1.0, 7
+            tracker.plan_started_on = start.date().isoformat()
+            for level in range(7):
+                session.add(
+                    LimitPeriod(
+                        tracker_id=tracker.id,
+                        starts_on=(start + timedelta(days=level * 9)).date().isoformat(),
+                        goal=goal,
+                        daily_limit=14.0 - level,
+                    )
+                )
+        else:
+            session.add(
+                LimitPeriod(
+                    tracker_id=tracker.id,
+                    starts_on=start.date().isoformat(),
+                    goal=goal,
+                    daily_limit=limit,
+                )
+            )
         for ago in range(days, -1, -1):
             # Sample hours read as the machine's local time, so "evening" looks like evening.
             day = (now - timedelta(days=ago)).astimezone()

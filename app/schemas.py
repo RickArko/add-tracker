@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator
@@ -102,6 +102,20 @@ class TrackerOut(BaseModel):
     daily_limit: float | None
     created_at: datetime
     archived_at: datetime | None
+    baseline_amount: float | None
+    step_amount: float | None
+    clear_days: int | None
+    plan_started_on: str | None
+
+
+class NoUseBody(StrictBody):
+    day: date
+
+
+class PlanBody(StrictBody):
+    baseline_amount: Amount
+    step_amount: Annotated[float, Field(ge=0.01, le=100_000)]
+    clear_days: Annotated[int, Field(ge=1, le=90)] = 7
 
 
 class TodayTracker(TrackerOut):
@@ -109,6 +123,7 @@ class TodayTracker(TrackerOut):
     amount_today: float
     urges_today: int
     last_use_at: datetime | None
+    game: dict
 
 
 class EntryCreate(StrictBody):
@@ -119,6 +134,7 @@ class EntryCreate(StrictBody):
     craving: Craving | None = None
     trigger: Trigger | None = None
     note: Note | None = None
+    client_id: Annotated[str, StringConstraints(min_length=8, max_length=64)] | None = None
 
 
 class EntryUpdate(StrictBody):

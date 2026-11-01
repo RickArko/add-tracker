@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { api, ApiError, type Tracker } from "../lib/api";
+import { api, ApiError, timeZone, type Tracker } from "../lib/api";
 import { GOALS, PRESETS, safetyNote, type Preset } from "../lib/catalog";
 
 const props = defineProps<{ tracker?: Tracker }>();
@@ -26,6 +26,7 @@ function choose(preset: Preset) {
   form.name = preset.name;
   form.category = preset.category;
   form.unit = preset.unit;
+  form.default_amount = preset.amount ?? 1;
 }
 
 async function submit() {
@@ -36,10 +37,11 @@ async function submit() {
     default_amount: form.default_amount === "" ? 1 : form.default_amount,
     daily_limit: !showLimit.value || form.daily_limit === "" ? null : form.daily_limit,
   };
+  const tz = `?tz=${encodeURIComponent(timeZone())}`;
   try {
     const saved = props.tracker
-      ? await api<Tracker>(`/api/trackers/${props.tracker.id}`, "PATCH", body)
-      : await api<Tracker>("/api/trackers", "POST", body);
+      ? await api<Tracker>(`/api/trackers/${props.tracker.id}${tz}`, "PATCH", body)
+      : await api<Tracker>(`/api/trackers${tz}`, "POST", body);
     emit("saved", saved);
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : "That didn't save. Try again.";
@@ -77,10 +79,11 @@ async function submit() {
         <label class="field grow">
           <span>Count it in</span>
           <input v-model="form.unit" required maxlength="20" autocomplete="off" />
+          <small>A word like "drink", or a measure like "mg". Your logs and limit both use it.</small>
           <small v-if="tracker">Changing this relabels past logs without converting their amounts.</small>
         </label>
         <label class="field amount">
-          <span>Each log counts as</span>
+          <span>Each log counts as ({{ form.unit || "units" }})</span>
           <input v-model.number="form.default_amount" type="number" min="0.01" step="any" inputmode="decimal" required />
         </label>
       </div>
@@ -96,7 +99,7 @@ async function submit() {
       </fieldset>
 
       <label v-if="showLimit" class="field">
-        <span>Daily limit <small>Optional, and yours to set</small></span>
+        <span>Daily limit ({{ form.unit || "units" }}) <small>Optional, and yours to set</small></span>
         <input v-model.number="form.daily_limit" type="number" min="0" step="any" inputmode="decimal" />
       </label>
 

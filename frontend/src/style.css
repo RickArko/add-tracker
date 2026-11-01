@@ -190,7 +190,7 @@ input:not([type="radio"]), textarea {
 .bar { fill: var(--use); }
 .band { fill: var(--ink); opacity: 0.07; }
 .average { fill: none; stroke: var(--average); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-line.limit { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
+path.limit { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 .tip {
   position: absolute; top: 8px; pointer-events: none; z-index: 2;
   display: flex; flex-direction: column; padding: 8px 12px; border-radius: 10px;
@@ -258,3 +258,21 @@ line.limit { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
 }
 
 input:not([type="radio"]).visually-hidden { width: 1px; min-height: 0; padding: 0; border: 0; }
+
+/* Levels */
+h3 { margin: 0; font-size: 1.1rem; }
+.level-panel { background: var(--surface); padding: 18px; border-radius: var(--radius); }
+.level-panel h2 { font-size: 1.6rem; }
+.level-limit { font-size: 1.15rem; font-weight: 600; }
+.level-progress { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-bottom: 8px; }
+.step-down { background: transparent; border: 2px solid var(--use); min-height: 52px; text-align: center; }
+.waiting { background: var(--surface); padding: 8px 12px; border-radius: 10px; font-weight: 600; }
+.plan-preview { font-weight: 600; }
+.milestones { display: flex; flex-direction: column; gap: 12px; }
+.milestones li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+.milestone-name { font-weight: 600; }
+.milestone-count { color: var(--muted); font-size: 0.92rem; }
+.milestone-bar { grid-column: 1 / -1; height: 8px; border-radius: 4px; background: color-mix(in oklab, var(--rule) 55%, transparent); overflow: hidden; }
+.milestone-bar i { display: block; height: 100%; background: var(--urge); border-radius: 4px; }
+.tracker-plan { flex: 1 1 100%; }
+.blank-day { display: flex; flex-direction: column; gap: 6px; background: var(--surface); padding: 12px 14px; border-radius: 10px; }

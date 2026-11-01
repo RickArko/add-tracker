@@ -1,7 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
 const PORT = 8765;
-const db = process.env.TALLY_E2E_DB ?? `/tmp/tally-e2e-${process.pid}.db`;
+// Kept in the environment so test workers can reach the same file.
+process.env.TALLY_E2E_DB ??= `/tmp/tally-e2e-${process.pid}.db`;
+const db = process.env.TALLY_E2E_DB;
 
 export default defineConfig({
   testDir: "e2e",
@@ -11,6 +13,8 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     screenshot: "only-on-failure",
+    // On for the offline test only; a worker would hide requests from other tests' checks.
+    serviceWorkers: "block",
     launchOptions: process.env.TALLY_CHROMIUM
       ? { executablePath: process.env.TALLY_CHROMIUM }
       : {},

@@ -1,8 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import pytest
-
 from app.stats import EntryRow, compute_stats, day_bounds
 
 NY = ZoneInfo("America/New_York")
@@ -73,9 +71,10 @@ def test_moving_average_uses_only_tracked_days():
 def test_moving_average_reaches_outside_visible_window():
     entries = [use(NOW - timedelta(days=8), 7.0)]
     stats = run(entries, days=7)
-    # June 9 is the first visible day; its 7-day span runs June 3 to 9 and includes June 7.
+    # June 9 is the first visible day; its 7-day span runs June 3 to 9. June 7 is the only day
+    # accounted for, so blank days don't dilute the average.
     assert stats["daily"][0]["date"] == "2026-06-09"
-    assert stats["daily"][0]["average_7d"] == 1
+    assert stats["daily"][0]["average_7d"] == 7
 
 
 def test_week_comparison_ignores_partial_today():
@@ -93,6 +92,11 @@ def test_week_comparison_absent_without_enough_history():
     assert summary["previous_7"] is None and summary["change_pct"] is None
 
 
+def test_no_percent_when_a_compared_week_has_blank_days():
+    entries = [use(NOW - timedelta(days=d)) for d in range(2, 15)]
+    assert run(entries)["summary"]["change_pct"] is None
+
+
 def test_no_percent_when_previous_week_was_zero():
     summary = run([use(NOW - timedelta(days=2))])["summary"]
     assert summary["previous_7"] == 0 and summary["change_pct"] is None
@@ -102,7 +106,7 @@ def test_within_goal_counts_finished_days_against_limit():
     created = NOW - timedelta(days=3)
     entries = [use(NOW - timedelta(days=1), 3.0), use(NOW - timedelta(days=2), 2.0), use(NOW, 9.0)]
     within = run(entries, limit=2, created=created)["summary"]["within_goal"]
-    assert within == {"days": 2, "of": 3, "limit": 2}
+    assert within == {"days": 1, "of": 2, "limit": 2}  # the blank day isn't counted
 
 
 def test_quit_goal_treats_any_use_as_outside_goal():
@@ -110,7 +114,7 @@ def test_quit_goal_treats_any_use_as_outside_goal():
     within = run([use(NOW - timedelta(days=1))], goal="quit", created=created)["summary"][
         "within_goal"
     ]
-    assert within == {"days": 1, "of": 2, "limit": 0}
+    assert within == {"days": 0, "of": 1, "limit": 0}
 
 
 def test_no_goal_figure_without_a_limit():
@@ -139,12 +143,24 @@ def test_longest_gap_includes_time_since_last_use():
     assert run(entries, created=created)["summary"]["longest_gap_hours"] == 20
 
 
-def test_longest_gap_counts_from_tracking_start():
+def test_longest_gap_counts_from_tracking_start_when_days_are_confirmed():
     created = NOW - timedelta(days=30)
-    assert run([use(NOW - timedelta(hours=1))], created=created)["summary"][
-        "longest_gap_hours"
-    ] == pytest.approx(719)
-    assert run(created=created)["summary"]["longest_gap_hours"] == 720
+    days = [(NOW - timedelta(days=d)).astimezone(NY).date() for d in range(1, 31)]
+    result = compute_stats(
+        goal="reduce",
+        daily_limit=None,
+        created_at=created,
+        entries=[],
+        days=30,
+        tz=NY,
+        now=NOW,
+        confirmed_days=days,
+    )
+    assert result["summary"]["longest_gap_hours"] == 720
+
+
+def test_blank_days_never_make_a_stretch():
+    assert run(created=NOW - timedelta(days=30))["summary"]["longest_gap_hours"] == 0
 
 
 def test_one_old_backdated_entry_cannot_flatter_goal_or_gap():
@@ -162,4 +178,4 @@ def test_one_old_backdated_entry_cannot_flatter_goal_or_gap():
 def test_empty_tracker_is_safe():
     summary = run()["summary"]
     assert summary["uses_in_window"] == 0
-    assert summary["longest_gap_hours"] == 60 * 24 and summary["average_craving"] is None
+    assert summary["longest_gap_hours"] == 0 and summary["average_craving"] is None
