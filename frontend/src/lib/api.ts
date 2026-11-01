@@ -109,10 +109,14 @@ export function setUnauthorizedHandler(handler: () => void) {
 
 export const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
+export const USERNAME_RULE =
+  "Usernames can use letters, numbers, dots, dashes and underscores, with 3 to 40 characters. Email addresses aren't accepted.";
+
 function errorMessage(detail: unknown): string {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail) && detail[0]?.msg) {
     const field = detail[0].loc?.at(-1);
+    if (field === "username") return USERNAME_RULE;
     const message = String(detail[0].msg).replace(/^Value error, /, "");
     return field ? `${field}: ${message}` : message;
   }

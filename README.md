@@ -36,12 +36,17 @@ The first account created on a fresh database is the only one allowed, unless yo
 Needed to use Habit Helper from your phone. Create your account right after the first deploy, because until then anyone who finds the URL could claim the single account.
 
 ```bash
-fly launch --no-deploy --copy-config    # choose a unique app name
+fly launch --no-deploy --copy-config    # for a new copy; choose a unique app name
 fly volumes create habit_helper_data --size 1 --region iad
 fly deploy
 ```
 
 Fly needs exactly one machine, because SQLite and the login throttle live on that machine. If `fly launch` or `fly deploy` created a second one, run `fly scale count 1`.
+
+## Live
+
+- `https://habithelper.fly.dev` (Fly app `habithelper`, volume `habit_helper_data`, region `iad`)
+- `https://habithelper.rickarko.com` (A and AAAA records in Route 53, certificate through `fly certs`)
 
 ## Test
 

@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import TallyMarks from "../components/TallyMarks.vue";
-import { api, ApiError } from "../lib/api";
+import { api, ApiError, USERNAME_RULE } from "../lib/api";
 import { auth, loadAuth } from "../lib/auth";
 
 const router = useRouter();
@@ -12,8 +12,12 @@ const password = ref("");
 const error = ref("");
 const busy = ref(false);
 const registering = computed(() => mode.value === "register");
+const usernameInvalid = computed(
+  () => registering.value && username.value.trim() !== "" && !/^[a-zA-Z0-9_.-]{3,40}$/.test(username.value.trim()),
+);
 
 async function submit() {
+  if (usernameInvalid.value) return;
   busy.value = true;
   error.value = "";
   try {
@@ -50,7 +54,8 @@ async function submit() {
           autocapitalize="none"
           spellcheck="false"
         />
-        <small v-if="registering">Doesn't need to be your name. No email is asked for.</small>
+        <small v-if="usernameInvalid" class="error" role="alert">{{ USERNAME_RULE }}</small>
+        <small v-else-if="registering">Doesn't need to be your name, and an email address won't work here.</small>
       </label>
       <label class="field">
         <span>Passphrase</span>

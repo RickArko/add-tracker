@@ -399,6 +399,18 @@ test("undo after a lost reply really removes the log", async ({ page }) => {
   await expect(page.getByText("0 of 90 mg today")).toBeVisible();
 });
 
+test("an email as a username gets a plain explanation, not raw validation text", async ({ page }) => {
+  await page.goto("/login");
+  const create = page.getByRole("button", { name: "Create an account" });
+  if (await create.isVisible()) await create.click();
+  await page.getByLabel("Username").fill("someone@example.com");
+  await page.getByLabel("Passphrase").fill(PASSPHRASE);
+  await expect(page.getByRole("alert")).toContainText("Email addresses aren't accepted");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByText("String should match")).toBeHidden();
+});
+
 test("exports download and contain my data", async ({ page }) => {
   await register(page);
   await addAlcohol(page);
