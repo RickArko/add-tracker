@@ -25,7 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.db_path.chmod(0o600)
 
     # API docs stay off: nothing is exposed that the app itself doesn't use.
-    app = FastAPI(title="Tally", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(title="Habit Helper", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.sessionmaker = sessionmaker(
         make_engine(settings.db_url), expire_on_commit=False, autoflush=False

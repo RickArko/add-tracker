@@ -531,7 +531,7 @@ def export_csv(user: User = Depends(current_user), db: Session = Depends(get_db)
     return Response(
         out.getvalue(),
         media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": 'attachment; filename="tally-export.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="habit-helper-export.csv"'},
     )
 
 
@@ -562,5 +562,5 @@ def export_json(user: User = Depends(current_user), db: Session = Depends(get_db
     return Response(
         json.dumps(payload, indent=2),
         media_type="application/json",
-        headers={"Content-Disposition": 'attachment; filename="tally-export.json"'},
+        headers={"Content-Disposition": 'attachment; filename="habit-helper-export.json"'},
     )

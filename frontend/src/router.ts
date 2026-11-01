@@ -27,5 +27,5 @@ router.beforeEach(async (to) => {
 });
 
 router.afterEach((to) => {
-  document.title = `${to.meta.title} | Tally`;
+  document.title = `${to.meta.title} | Habit Helper`;
 });

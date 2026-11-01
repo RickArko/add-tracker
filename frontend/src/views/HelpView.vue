@@ -35,7 +35,7 @@ import { auth } from "../lib/auth";
     <section>
       <h2>Using this app</h2>
       <p>Levels are a pace you set yourself, not medical advice. They aren't offered for alcohol, benzodiazepines or opioids, because tapering those safely needs a clinician. If stepping down makes you unwell, move your limit back up in Settings and talk to a clinician. Nothing is lost.</p>
-      <p>Tally is a personal log. It doesn't diagnose, treat or give dosing advice, and any limit you set is your own, not a safe level. A log is only information. A day over your limit doesn't erase your progress, and it can show you what to plan for next time.</p>
+      <p>Habit Helper is a personal log. It doesn't diagnose, treat or give dosing advice, and any limit you set is your own, not a safe level. A log is only information. A day over your limit doesn't erase your progress, and it can show you what to plan for next time.</p>
     </section>
 
     <p class="footer-links">

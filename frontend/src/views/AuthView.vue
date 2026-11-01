@@ -35,7 +35,7 @@ async function submit() {
 <template>
   <div class="auth page">
     <TallyMarks :count="5" />
-    <h1>Tally</h1>
+    <h1>Habit Helper</h1>
     <p class="lede">Count what you use. See the pattern. Change it at your own pace.</p>
 
     <form @submit.prevent="submit">

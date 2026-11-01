@@ -1,4 +1,4 @@
-# Tally build plan
+# Habit Helper build plan
 
 ## Goal
 
@@ -72,7 +72,7 @@ The game is for an analytical person who wants to play against their own numbers
 | P7 | Spreadsheet formula injection neutralised in CSV | `test_export_csv_neutralises_spreadsheet_formulas` |
 | P8 | Single-account signup by default | `test_first_mode_allows_only_one_account` |
 
-**Known limit:** data isn't end-to-end encrypted. Fly encrypts volumes at rest, but whoever runs the server can read the database. Tally is also not a HIPAA-covered service. Both must be resolved or disclosed before hosting data for other people (see Phase 3).
+**Known limit:** data isn't end-to-end encrypted. Fly encrypts volumes at rest, but whoever runs the server can read the database. Habit Helper is also not a HIPAA-covered service. Both must be resolved or disclosed before hosting data for other people (see Phase 3).
 
 ### Non-functional requirements
 

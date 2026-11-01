@@ -1,8 +1,8 @@
-# Tally
+# Habit Helper
 
 Private, simple tracking for substance use and habits you want to change. Log with one tap, note urges you got through, and see the pattern over time.
 
-Tally is a personal log. It doesn't diagnose, treat or give dosing advice.
+Habit Helper is a personal log. It doesn't diagnose, treat or give dosing advice.
 
 ## Run it
 
@@ -33,11 +33,11 @@ The first account created on a fresh database is the only one allowed, unless yo
 
 ## Deploy to Fly
 
-Needed to use Tally from your phone. Create your account right after the first deploy, because until then anyone who finds the URL could claim the single account.
+Needed to use Habit Helper from your phone. Create your account right after the first deploy, because until then anyone who finds the URL could claim the single account.
 
 ```bash
 fly launch --no-deploy --copy-config    # choose a unique app name
-fly volumes create tally_data --size 1 --region iad
+fly volumes create habit_helper_data --size 1 --region iad
 fly deploy
 ```
 

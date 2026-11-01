@@ -1,6 +1,6 @@
 {
-  "name": "Tally",
-  "short_name": "Tally",
+  "name": "Habit Helper",
+  "short_name": "Habit Helper",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#141A30",

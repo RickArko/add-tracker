@@ -409,7 +409,7 @@ test("exports download and contain my data", async ({ page }) => {
     page.waitForEvent("download"),
     page.getByRole("link", { name: "Download as CSV" }).click(),
   ]);
-  expect(csv.suggestedFilename()).toBe("tally-export.csv");
+  expect(csv.suggestedFilename()).toBe("habit-helper-export.csv");
 });
 
 test("settings: hide, restore, delete tracker, log out and back in, delete account", async ({ page }) => {

@@ -1,4 +1,4 @@
-app = "tally-d469c8"
+app = "habithelper"
 primary_region = "iad"
 
 [build]
@@ -8,7 +8,7 @@ primary_region = "iad"
   TALLY_SECURE_COOKIES = "1"
 
 [[mounts]]
-  source = "tally_data"
+  source = "habit_helper_data"
   destination = "/data"
 
 [http_service]
