@@ -13,15 +13,27 @@ const editing = ref<Entry | null>(null);
 const toast = ref<{ text: string; entry?: Entry } | null>(null);
 const today = ref(new Date());
 let toastTimer: number | undefined;
+// Logs still being sent. A reload during one would overwrite its optimistic count.
+let pendingLogs = 0;
+let reloadWhenSettled = false;
 
 const editingTracker = computed(() =>
   trackers.value.find((t) => t.id === editing.value?.tracker_id),
 );
 
 async function load() {
+  if (pendingLogs > 0) {
+    reloadWhenSettled = true;
+    return;
+  }
   today.value = new Date();
   try {
-    trackers.value = await api<TodayTracker[]>(`/api/today?tz=${encodeURIComponent(timeZone())}`);
+    const fresh = await api<TodayTracker[]>(`/api/today?tz=${encodeURIComponent(timeZone())}`);
+    if (pendingLogs > 0) {
+      reloadWhenSettled = true;
+      return;
+    }
+    trackers.value = fresh;
     loadError.value = "";
   } catch (e) {
     loadError.value = e instanceof ApiError ? e.message : "Today's log didn't load.";
@@ -36,6 +48,7 @@ function showToast(text: string, entry?: Entry) {
 }
 
 async function log(tracker: TodayTracker, kind: "use" | "urge") {
+  pendingLogs += 1;
   // Update first, so a tap feels instant even on a slow connection.
   if (kind === "use") {
     tracker.uses_today += 1;
@@ -58,6 +71,12 @@ async function log(tracker: TodayTracker, kind: "use" | "urge") {
       tracker.urges_today -= 1;
     }
     showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
+  } finally {
+    pendingLogs -= 1;
+    if (pendingLogs === 0 && reloadWhenSettled) {
+      reloadWhenSettled = false;
+      void load();
+    }
   }
 }
 

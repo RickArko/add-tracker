@@ -2,14 +2,17 @@
 
 Usage:
     uv run python -m app.cli reset-password <username>
+    uv run python -m app.cli backup <file>      # a consistent copy, safe while the app runs
     uv run python -m app.cli seed-demo          # requires TALLY_DB_PATH to be set
 """
 
 import getpass
 import os
 import random
+import sqlite3
 import sys
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -97,8 +100,20 @@ def seed_demo(session: Session) -> None:
     print(f"Seeded. Log in as {DEMO_USER} / {DEMO_PASSWORD}")
 
 
+def backup(source: Path, destination: str) -> None:
+    if Path(destination).exists():
+        sys.exit(f"{destination} already exists.")
+    with sqlite3.connect(source) as src, sqlite3.connect(destination) as dst:
+        src.backup(dst)
+    Path(destination).chmod(0o600)
+    print(f"Backed up to {destination}.")
+
+
 def main() -> None:
     args = sys.argv[1:]
+    if len(args) == 2 and args[0] == "backup":
+        backup(load_settings().db_path, args[1])
+        return
     if args[:1] == ["seed-demo"] and "TALLY_DB_PATH" not in os.environ:
         sys.exit("Set TALLY_DB_PATH to a throwaway database before seeding.")
     settings = load_settings()

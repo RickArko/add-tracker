@@ -41,6 +41,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; min-height: 100dvh; }
 h1, h2, p, ul, dl, dd, fieldset { margin: 0; padding: 0; }
+h1, h2, strong, .chip { overflow-wrap: anywhere; }
 ul { list-style: none; }
 fieldset { border: 0; min-width: 0; }
 a { color: var(--use); text-underline-offset: 0.18em; }

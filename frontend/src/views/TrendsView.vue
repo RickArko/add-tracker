@@ -13,6 +13,7 @@ const error = ref("");
 const loaded = ref(false);
 
 const RANGES = [7, 30, 90, 365];
+let latestRequest = 0;
 
 const tracker = computed(() => trackers.value.find((t) => t.id === trackerId.value));
 const summary = computed(() => stats.value?.summary);
@@ -31,12 +32,18 @@ const weekLine = computed(() => {
 
 async function loadStats() {
   if (trackerId.value === null) return;
+  // A slower earlier reply must never show up under the tracker chosen since.
+  const request = ++latestRequest;
+  stats.value = null;
   try {
-    stats.value = await api<Stats>(
+    const result = await api<Stats>(
       `/api/trackers/${trackerId.value}/stats?days=${days.value}&tz=${encodeURIComponent(timeZone())}`,
     );
+    if (request !== latestRequest) return;
+    stats.value = result;
     error.value = "";
   } catch (e) {
+    if (request !== latestRequest) return;
     error.value = e instanceof ApiError ? e.message : "Trends didn't load.";
   }
 }
@@ -45,7 +52,9 @@ watch([trackerId, days], loadStats);
 
 onMounted(async () => {
   try {
-    trackers.value = await api<Tracker[]>("/api/trackers");
+    const all = await api<Tracker[]>("/api/trackers?include_archived=true");
+    // Hidden trackers keep their history, so they stay reachable here, after the active ones.
+    trackers.value = [...all.filter((t) => !t.archived_at), ...all.filter((t) => t.archived_at)];
     trackerId.value = trackers.value[0]?.id ?? null;
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : "Trends didn't load.";
@@ -73,7 +82,7 @@ onMounted(async () => {
             :aria-pressed="t.id === trackerId"
             @click="trackerId = t.id"
           >
-            {{ t.name }}
+            {{ t.name }}<template v-if="t.archived_at"> (hidden)</template>
           </button>
         </div>
         <div class="chips" role="group" aria-label="Time range">

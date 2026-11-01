@@ -78,7 +78,14 @@ async function changePassword() {
 }
 
 async function logout() {
-  await api("/api/auth/logout", "POST").catch(() => {});
+  error.value = "";
+  try {
+    await api("/api/auth/logout", "POST");
+  } catch (e) {
+    error.value = message(e, "You're still logged in. Try again.");
+    window.scrollTo(0, 0);
+    return;
+  }
   auth.username = null;
   await loadAuth().catch(() => {});
   await router.push("/login");

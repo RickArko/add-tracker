@@ -1,7 +1,9 @@
 """Turns raw entries into trend numbers. Pure functions, no database access.
 
-Calendar days are always the user's local days. Days before tracking began are excluded rather
-than counted as zero, because a false run of zeros would flatter every early average.
+Calendar days are always the user's local days. Goal figures, comparisons and gaps start when the
+tracker was created. An unlogged day before then isn't a day without use, it just wasn't recorded,
+so one backdated entry (or a mistyped year) can't invent months of flattering zeros. Backdated
+entries still appear on the chart.
 """
 
 from collections import Counter, defaultdict
@@ -39,8 +41,9 @@ def compute_stats(
 ) -> dict[str, Any]:
     today = now.astimezone(tz).date()
     local_days = [e.occurred_at.astimezone(tz).date() for e in entries]
-    first_day = min([created_at.astimezone(tz).date(), *local_days])
-    window_start = max(today - timedelta(days=days - 1), first_day)
+    first_day = created_at.astimezone(tz).date()
+    earliest_day = min([first_day, *local_days])
+    window_start = max(today - timedelta(days=days - 1), earliest_day)
 
     amount_by_day: dict[date, float] = defaultdict(float)
     uses_by_day: Counter[date] = Counter()
@@ -53,7 +56,8 @@ def compute_stats(
             urges_by_day[day] += 1
 
     def average_ending(day: date) -> float:
-        start = max(day - timedelta(days=6), first_day)
+        # Backdated days average among themselves; they don't dilute the tracked period.
+        start = max(day - timedelta(days=6), first_day if day >= first_day else earliest_day)
         span = (day - start).days + 1
         return sum(amount_by_day.get(start + timedelta(days=i), 0) for i in range(span)) / span
 
@@ -105,7 +109,7 @@ def compute_stats(
         change_pct = round((recent_7 - previous_7) / previous_7 * 100)
 
     limit = 0.0 if goal == "quit" else daily_limit
-    finished = [d for d in daily if d["date"] < today.isoformat()]
+    finished = [d for d in daily if first_day.isoformat() <= d["date"] < today.isoformat()]
     within_goal = None
     if limit is not None:
         within_goal = {
@@ -115,10 +119,9 @@ def compute_stats(
         }
 
     use_times = sorted(e.occurred_at for e in entries if e.kind == "use")
-    gaps = [b - a for a, b in zip(use_times, use_times[1:], strict=False)]
-    if use_times:
-        gaps.append(now - use_times[-1])
-    longest_gap_hours = round(max(gaps).total_seconds() / 3600, 1) if gaps else None
+    marks = [created_at, *(t for t in use_times if t >= created_at), now]
+    longest_gap = max(b - a for a, b in zip(marks, marks[1:], strict=False))
+    longest_gap_hours = round(max(longest_gap.total_seconds(), 0) / 3600, 1)
 
     return {
         "window_start": window_start.isoformat(),

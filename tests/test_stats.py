@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.stats import EntryRow, compute_stats, day_bounds
 
 NY = ZoneInfo("America/New_York")
@@ -133,10 +135,31 @@ def test_heatmap_uses_local_weekday_and_hour():
 
 def test_longest_gap_includes_time_since_last_use():
     entries = [use(NOW - timedelta(hours=30)), use(NOW - timedelta(hours=20))]
-    assert run(entries)["summary"]["longest_gap_hours"] == 20
+    created = NOW - timedelta(hours=31)
+    assert run(entries, created=created)["summary"]["longest_gap_hours"] == 20
+
+
+def test_longest_gap_counts_from_tracking_start():
+    created = NOW - timedelta(days=30)
+    assert run([use(NOW - timedelta(hours=1))], created=created)["summary"][
+        "longest_gap_hours"
+    ] == pytest.approx(719)
+    assert run(created=created)["summary"]["longest_gap_hours"] == 720
+
+
+def test_one_old_backdated_entry_cannot_flatter_goal_or_gap():
+    created = NOW - timedelta(days=3)
+    entries = [use(NOW - timedelta(days=d), 5.0) for d in range(0, 4)]
+    entries.append(use(NOW - timedelta(days=300)))
+    stats = run(entries, limit=2, created=created, days=365)
+    summary = stats["summary"]
+    assert summary["within_goal"] == {"days": 0, "of": 3, "limit": 2}
+    assert summary["longest_gap_hours"] < 25
+    assert stats["daily"][-1]["average_7d"] == 5
+    assert stats["window_start"] == "2025-08-19"  # still visible on the chart
 
 
 def test_empty_tracker_is_safe():
     summary = run()["summary"]
     assert summary["uses_in_window"] == 0
-    assert summary["longest_gap_hours"] is None and summary["average_craving"] is None
+    assert summary["longest_gap_hours"] == 60 * 24 and summary["average_craving"] is None

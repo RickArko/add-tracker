@@ -1,11 +1,11 @@
 import csv
 import io
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,8 @@ router = APIRouter(prefix="/api", tags=["data"])
 
 # Tolerates clock skew between device and server, while still catching mistaken future dates.
 FUTURE_TOLERANCE = timedelta(minutes=5)
+EARLIEST_ENTRY = datetime(2000, 1, 1, tzinfo=UTC)
+DbId = Annotated[int, Path(ge=1, le=2**63 - 1)]
 
 
 def parse_tz(tz: str = Query("UTC", max_length=64)) -> ZoneInfo:
@@ -50,7 +52,9 @@ def _owned_entry(db: Session, user: User, entry_id: int) -> Entry:
     return entry
 
 
-def _check_not_future(when: datetime) -> None:
+def _check_entry_time(when: datetime) -> None:
+    if when < EARLIEST_ENTRY:
+        raise HTTPException(status_code=422, detail="Check the year: that date is too far back.")
     if when > now_utc() + FUTURE_TOLERANCE:
         raise HTTPException(status_code=422, detail="Time can't be in the future.")
 
@@ -85,7 +89,7 @@ def create_tracker(
 
 @router.patch("/trackers/{tracker_id}")
 def update_tracker(
-    tracker_id: int,
+    tracker_id: DbId,
     body: TrackerUpdate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -94,7 +98,8 @@ def update_tracker(
     changes = body.model_dump(exclude_unset=True)
     if "archived" in changes:
         archived = changes.pop("archived")
-        tracker.archived_at = now_utc() if archived else None
+        if archived is not None:
+            tracker.archived_at = now_utc() if archived else None
     for field, value in changes.items():
         if value is None and field != "daily_limit":
             raise HTTPException(status_code=422, detail=f"{field} can't be empty.")
@@ -107,7 +112,7 @@ def update_tracker(
 
 @router.delete("/trackers/{tracker_id}", status_code=204)
 def delete_tracker(
-    tracker_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)
+    tracker_id: DbId, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> None:
     db.delete(_owned_tracker(db, user, tracker_id))
     db.commit()
@@ -160,9 +165,9 @@ def today(
 
 @router.get("/entries")
 def list_entries(
-    tracker_id: int | None = None,
+    tracker_id: Annotated[int | None, Query(ge=1, le=2**63 - 1)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=2**62)] = 0,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> list[EntryOut]:
@@ -185,7 +190,7 @@ def create_entry(
 ) -> EntryOut:
     tracker = _owned_tracker(db, user, body.tracker_id)
     occurred_at = body.occurred_at or now_utc()
-    _check_not_future(occurred_at)
+    _check_entry_time(occurred_at)
     amount = None
     if body.kind == "use":
         # Copied onto the entry, so editing the tracker's default later can't rewrite history.
@@ -206,7 +211,7 @@ def create_entry(
 
 @router.patch("/entries/{entry_id}")
 def update_entry(
-    entry_id: int,
+    entry_id: DbId,
     body: EntryUpdate,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
@@ -214,7 +219,7 @@ def update_entry(
     entry = _owned_entry(db, user, entry_id)
     changes = body.model_dump(exclude_unset=True)
     if "occurred_at" in changes:
-        _check_not_future(changes["occurred_at"])
+        _check_entry_time(changes["occurred_at"])
     if "amount" in changes:
         if entry.kind == "urge" and changes["amount"] is not None:
             raise HTTPException(status_code=422, detail="Urges don't have an amount.")
@@ -228,7 +233,7 @@ def update_entry(
 
 @router.delete("/entries/{entry_id}", status_code=204)
 def delete_entry(
-    entry_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)
+    entry_id: DbId, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> None:
     db.delete(_owned_entry(db, user, entry_id))
     db.commit()
@@ -239,7 +244,7 @@ def delete_entry(
 
 @router.get("/trackers/{tracker_id}/stats")
 def tracker_stats(
-    tracker_id: int,
+    tracker_id: DbId,
     days: Annotated[int, Query(ge=7, le=365)] = 30,
     tz: ZoneInfo = Depends(parse_tz),
     user: User = Depends(current_user),

@@ -1,3 +1,4 @@
+import threading
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -30,6 +31,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         make_engine(settings.db_url), expire_on_commit=False, autoflush=False
     )
     app.state.login_throttle = LoginThrottle()
+    app.state.signup_lock = threading.Lock()
+
+    @app.exception_handler(UnicodeEncodeError)
+    async def bad_text(_request: Request, _exc: UnicodeEncodeError) -> JSONResponse:
+        return JSONResponse({"detail": "That text contains invalid characters."}, status_code=422)
 
     @app.middleware("http")
     async def protect(request: Request, call_next):
@@ -69,9 +75,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def frontend(path: str) -> FileResponse:
         if path == "api" or path.startswith("api/"):
             raise HTTPException(status_code=404, detail="Not found.")
-        candidate = (dist / path).resolve()
-        if path and candidate.is_relative_to(dist) and candidate.is_file():
-            return FileResponse(candidate)
+        if path and "\0" not in path:
+            candidate = (dist / path).resolve()
+            if candidate.is_relative_to(dist) and candidate.is_file():
+                return FileResponse(candidate)
         index = dist / "index.html"
         if not index.is_file():
             raise HTTPException(status_code=503, detail="Frontend not built: run scripts/dev.sh")

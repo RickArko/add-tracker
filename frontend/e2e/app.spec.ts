@@ -50,7 +50,7 @@ test("the core loop: track, log, undo, add details, see trends and history", asy
 
   // Safety note appears for a goal where sudden stopping can be dangerous.
   await page.getByRole("button", { name: "Alcohol" }).click();
-  await expect(page.getByText("stopping suddenly can cause seizures")).toBeVisible();
+  await expect(page.getByText("sharply cutting back can cause seizures")).toBeVisible();
   await page.getByLabel("Daily limit").fill("2");
   await page.getByRole("button", { name: "Start tracking" }).click();
 
@@ -94,6 +94,7 @@ test("the core loop: track, log, undo, add details, see trends and history", asy
   await expect(page.getByText("hard meeting")).toBeVisible();
   await page.getByText("hard meeting").click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete entry" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm delete" }).click();
   await expect(page.getByText("hard meeting")).toBeHidden();
 
   expect(problems).toEqual([]);
@@ -137,6 +138,52 @@ test("today uses the device time zone, not the server's", async ({ browser }) =>
   await page.reload();
   await expect(page.getByText("1 of 2 drinks today")).toBeVisible();
   await here.close();
+});
+
+test("rapid taps while a reload lands keep the right count", async ({ page }) => {
+  await register(page);
+  await addAlcohol(page);
+  await page.route("**/api/entries", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  const log = page.getByRole("button", { name: "Log 1 drink" });
+  await log.click();
+  await log.click();
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await log.click();
+  await expect(page.getByText("3 of 2 drinks today")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByText("3 of 2 drinks today")).toBeVisible();
+});
+
+test("a hidden tracker stays reachable in Trends", async ({ page }) => {
+  await register(page);
+  await addAlcohol(page);
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Hide" }).click();
+  await expect(page.getByText("Hidden from Today")).toBeVisible();
+  await page.getByRole("link", { name: "Trends" }).click();
+  await expect(page.getByRole("heading", { name: "Use per day" })).toBeVisible();
+});
+
+test("a very long unbroken name doesn't overflow a phone", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 360, height: 740 } });
+  const page = await context.newPage();
+  await register(page);
+  await page.getByRole("button", { name: "Something else" }).click();
+  await page.getByLabel("Name").fill("W".repeat(60));
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page.getByRole("button", { name: "Log 1 time" })).toBeVisible();
+  for (const path of ["/", "/trends", "/settings"]) {
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, path).toBeLessThanOrEqual(0);
+  }
+  await context.close();
 });
 
 test("exports download and contain my data", async ({ page }) => {

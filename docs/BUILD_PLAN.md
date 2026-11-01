@@ -36,7 +36,8 @@ A working app one person can start using today to log consumption or a habit and
 ### Correctness rules
 
 - Calendar days are the device's local days, including 23- and 25-hour daylight saving days.
-- Days before tracking began aren't counted as zero, because that would flatter early averages.
+- Days before a tracker was created aren't counted as zero or as days within a goal, because that would flatter the figures. Backdated entries still show on the chart.
+- Entries dated before 2000 or in the future are refused.
 - Week-on-week compares finished days only, so a part-finished today can't look like an improvement.
 - An entry stores its own amount, so changing a tracker's default later doesn't rewrite history.
 
@@ -73,6 +74,7 @@ SQLite in WAL mode, one file on one volume
 |---|---|---|
 | SQLite on one machine | Simple, cheap and easy to back up, and enough for many users | Multiple machines are needed; move to Postgres (only `app/db.py` and the migrations are SQLite-aware) |
 | Server computes stats | One tested implementation that a future phone app can reuse | Offline-first needs them on the device |
+| One password hash at a time | Each takes 64 MiB, and a burst could otherwise crash a small server | Multiple machines |
 | Time zone sent with each request | Days follow the person, and storage stays plain UTC | Per-entry zones are wanted, so travel doesn't re-bucket old days |
 | No chart library | Smaller dependency surface, and full control of accessibility and dark mode | Charts need zooming or similar |
 | Web app first, installable to the home screen | One codebase gets onto a phone today | Reminders, widgets or offline logging are needed |

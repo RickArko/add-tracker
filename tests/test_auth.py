@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.models import AuthSession, User
@@ -62,11 +65,30 @@ def test_login_throttled_after_repeated_failures(client):
 def test_throttle_window_expires():
     now = [0.0]
     throttle = LoginThrottle(limit=2, window=10, clock=lambda: now[0])
-    throttle.record_failure("a")
-    throttle.record_failure("a")
-    assert throttle.blocked("a")
+    assert throttle.reserve("a") and throttle.reserve("a")
+    assert not throttle.reserve("a")
     now[0] = 11
-    assert not throttle.blocked("a")
+    assert throttle.reserve("a")
+
+
+def post_in_parallel(client, path, bodies):
+    def send(body):
+        return TestClient(client.app, base_url="http://testserver").post(path, json=body)
+
+    with ThreadPoolExecutor(len(bodies)) as pool:
+        return [r.status_code for r in pool.map(send, bodies)]
+
+
+def test_parallel_guesses_cannot_beat_the_throttle(client):
+    client.post("/api/auth/register", json=creds())
+    codes = post_in_parallel(client, "/api/auth/login", [creds(password="wrong")] * 8)
+    assert codes.count(401) == 5 and codes.count(429) == 3
+
+
+def test_parallel_signups_cannot_all_be_first(tmp_path):
+    client = build_client(tmp_path, signup="first")
+    codes = post_in_parallel(client, "/api/auth/register", [creds(f"user{i}") for i in range(4)])
+    assert codes.count(201) == 1 and codes.count(403) == 3
 
 
 def test_change_password_signs_out_other_devices(client, tmp_path):

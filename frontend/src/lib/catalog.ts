@@ -29,14 +29,13 @@ export const GOALS: { value: Goal; label: string; hint: string }[] = [
 
 export const TRIGGERS = ["Stress", "Boredom", "Social", "Routine", "Tired", "Low mood", "Pain", "Celebrating"];
 
-/** Shown when someone plans to stop or cut back on something with a dangerous withdrawal. */
-export function safetyNote(category: Category, goal: Goal): string | null {
-  if (goal !== "quit" && goal !== "reduce") return null;
+/** Shown for any goal: a low limit can be a sharp reduction, whatever the goal is called. */
+export function safetyNote(category: Category): string | null {
   if (category === "alcohol" || category === "benzodiazepine") {
-    return "If you use this daily or heavily, stopping suddenly can cause seizures and can be life-threatening. Talk to a clinician before you stop. They can help you taper safely.";
+    return "If you use this daily or heavily, stopping or sharply cutting back can cause seizures and can be life-threatening. Talk to a clinician before you change how much you use. They can help you taper safely.";
   }
   if (category === "opioid") {
-    return "Tolerance drops quickly after cutting back, so a dose you used to take can become an overdose. Keep naloxone nearby and ask a clinician about medication, which greatly lowers risk.";
+    return "Tolerance drops quickly after cutting back or stopping, so a dose you used to take can become an overdose. Keep naloxone nearby and ask a clinician about medication, which greatly lowers risk.";
   }
   return null;
 }

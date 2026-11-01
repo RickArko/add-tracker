@@ -17,17 +17,21 @@ from app.models import AuthSession, User
 
 COOKIE_NAME = "tally_session"
 _hasher = PasswordHasher()
+# Each hash takes 64 MiB. One at a time stops a burst of logins exhausting a small server's memory.
+_hash_slot = threading.BoundedSemaphore(1)
 # Verified against when a username does not exist, so response time doesn't reveal which do.
 _DUMMY_HASH = _hasher.hash(secrets.token_urlsafe(16))
 
 
 def hash_password(password: str) -> str:
-    return _hasher.hash(password)
+    with _hash_slot:
+        return _hasher.hash(password)
 
 
 def verify_password(password_hash: str | None, password: str) -> bool:
     try:
-        ok = _hasher.verify(password_hash or _DUMMY_HASH, password)
+        with _hash_slot:
+            ok = _hasher.verify(password_hash or _DUMMY_HASH, password)
     except (VerificationError, InvalidHashError):
         return False
     return ok and password_hash is not None
@@ -117,16 +121,19 @@ class LoginThrottle:
             self._failures.pop(key, None)
         return recent
 
-    def blocked(self, key: str) -> bool:
-        with self._lock:
-            return len(self._recent(key)) >= self.limit
+    def reserve(self, key: str) -> bool:
+        """Claims an attempt before the passphrase is checked, so parallel guesses all count.
 
-    def record_failure(self, key: str) -> None:
+        Returns False if the limit is used up. A successful login clears it with `reset`.
+        """
         with self._lock:
+            if len(self._recent(key)) >= self.limit:
+                return False
             if len(self._failures) > 10_000:
                 for existing in list(self._failures):
                     self._recent(existing)
             self._failures.setdefault(key, []).append(self.clock())
+            return True
 
     def reset(self, key: str) -> None:
         with self._lock:

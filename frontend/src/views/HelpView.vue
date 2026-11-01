@@ -20,14 +20,14 @@ import { auth } from "../lib/auth";
       <ul>
         <li><strong>SAMHSA National Helpline (US):</strong> <a href="tel:18006624357">1-800-662-4357</a>. Free, confidential, open 24 hours, for treatment referrals and information.</li>
         <li><strong>Quit smoking or vaping (US):</strong> <a href="tel:18007848669">1-800-784-8669</a>.</li>
-        <li><strong>Gambling (US):</strong> <a href="tel:18005224700">1-800-522-4700</a>.</li>
+        <li><strong>Gambling (US):</strong> <a href="tel:18006973738">1-800-MY-RESET (1-800-697-3738)</a>.</li>
         <li><strong>Outside the US:</strong> your doctor or local health service can direct you to support nearby.</li>
       </ul>
     </section>
 
     <section>
       <h2>Stopping safely</h2>
-      <p><strong>Alcohol and benzodiazepines:</strong> if you use them daily or heavily, stopping suddenly can cause seizures and can be fatal. A clinician can help you taper or detox safely.</p>
+      <p><strong>Alcohol and benzodiazepines:</strong> if you use them daily or heavily, stopping or sharply cutting back can cause seizures and can be fatal. A clinician can help you taper or detox safely.</p>
       <p><strong>Opioids:</strong> tolerance falls quickly after cutting back, so an old dose can become an overdose. Medications such as buprenorphine and methadone greatly lower that risk. Keep naloxone on hand.</p>
       <p><strong>Prescribed medication:</strong> talk to your prescriber before changing how you take it.</p>
     </section>

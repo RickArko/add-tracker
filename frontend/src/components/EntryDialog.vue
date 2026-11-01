@@ -16,6 +16,7 @@ const trigger = ref(props.entry.trigger ?? "");
 const note = ref(props.entry.note ?? "");
 const error = ref("");
 const busy = ref(false);
+const confirmingDelete = ref(false);
 const nowMax = toLocalInput(new Date());
 
 const options = computed(() =>
@@ -116,7 +117,8 @@ const remove = () =>
       <div class="actions">
         <button class="primary" type="submit" :disabled="busy">Save</button>
         <button type="button" class="quiet" @click="dialog?.close()">Cancel</button>
-        <button type="button" class="quiet push-right" :disabled="busy" @click="remove">Delete entry</button>
+        <button v-if="!confirmingDelete" type="button" class="quiet push-right" @click="confirmingDelete = true">Delete entry</button>
+        <button v-else type="button" class="danger push-right" :disabled="busy" @click="remove">Confirm delete</button>
       </div>
     </form>
   </dialog>

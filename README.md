@@ -27,9 +27,9 @@ The first account created on a fresh database is the only one allowed, unless yo
 
 ## Back up and recover
 
-- **Back up:** Settings has CSV and JSON downloads. For a full copy, run `sqlite3 data/tally.db ".backup backup.db"`.
+- **Back up:** Settings has CSV and JSON downloads. For a full copy, run `uv run python -m app.cli backup backup.db`.
 - **Import:** there's no way to load an export back in yet, so a `.backup` copy is what you'd restore from.
-- **Forgotten passphrase:** there's no email reset. Whoever runs the server can use `uv run python -m app.cli reset-password <username>`. On Fly, run it through `fly ssh console`.
+- **Forgotten passphrase:** there's no email reset. Whoever runs the server can use `uv run python -m app.cli reset-password <username>`. On Fly, open `fly ssh console`, then run `cd /srv && .venv/bin/python -m app.cli <command>`. Files you back up there can be fetched with `fly ssh sftp get`.
 
 ## Deploy to Fly
 

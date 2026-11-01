@@ -19,7 +19,7 @@ const error = ref("");
 const busy = ref(false);
 
 const showLimit = computed(() => form.goal !== "quit");
-const safety = computed(() => safetyNote(form.category, form.goal));
+const safety = computed(() => safetyNote(form.category));
 
 function choose(preset: Preset) {
   chosen.value = preset.label;
@@ -77,6 +77,7 @@ async function submit() {
         <label class="field grow">
           <span>Count it in</span>
           <input v-model="form.unit" required maxlength="20" autocomplete="off" />
+          <small v-if="tracker">Changing this relabels past logs without converting their amounts.</small>
         </label>
         <label class="field amount">
           <span>Each log counts as</span>

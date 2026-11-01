@@ -13,6 +13,8 @@ const loaded = ref(false);
 const error = ref("");
 const editing = ref<Entry | null>(null);
 
+let latestRequest = 0;
+
 const trackerFor = (id: number) => trackers.value.find((t) => t.id === id);
 
 const days = computed(() => {
@@ -34,8 +36,10 @@ function describe(entry: Entry): string {
 async function fetchPage(offset: number) {
   const query = new URLSearchParams({ limit: String(PAGE + 1), offset: String(offset) });
   if (filter.value !== null) query.set("tracker_id", String(filter.value));
+  const request = ++latestRequest;
   try {
     const page = await api<Entry[]>(`/api/entries?${query}`);
+    if (request !== latestRequest) return;
     more.value = page.length > PAGE;
     const rows = page.slice(0, PAGE);
     entries.value = offset ? [...entries.value, ...rows] : rows;
@@ -50,8 +54,10 @@ async function reloadAll() {
   const count = Math.max(PAGE, entries.value.length);
   const query = new URLSearchParams({ limit: String(Math.min(200, count + 1)), offset: "0" });
   if (filter.value !== null) query.set("tracker_id", String(filter.value));
+  const request = ++latestRequest;
   try {
     const page = await api<Entry[]>(`/api/entries?${query}`);
+    if (request !== latestRequest) return;
     const size = Math.min(200, count + 1) - 1;
     more.value = page.length > size;
     entries.value = page.slice(0, size);

@@ -73,6 +73,35 @@ def test_today_uses_the_local_midnight_of_the_requested_zone(authed, tracker):
     assert day["uses_today"] == 1
 
 
+def test_implausibly_old_dates_are_refused(authed, tracker):
+    for when in ("0001-01-01T00:00:00Z", "0001-01-01T00:00:00+14:00", "1999-12-31T00:00:00Z"):
+        body = {"tracker_id": tracker["id"], "occurred_at": when}
+        assert authed.post("/api/entries", json=body).status_code == 422
+    entry = authed.post("/api/entries", json={"tracker_id": tracker["id"]}).json()
+    res = authed.patch(f"/api/entries/{entry['id']}", json={"occurred_at": "0001-01-01T00:00:00Z"})
+    assert res.status_code == 422
+
+
+def test_bad_input_gets_a_client_error_not_a_crash(authed, tracker):
+    huge = 2**70
+    assert authed.get(f"/api/trackers/{huge}/stats").status_code == 422
+    assert authed.get("/api/entries", params={"offset": huge}).status_code == 422
+    assert authed.post("/api/entries", json={"tracker_id": huge}).status_code == 422
+    res = authed.post(
+        "/api/entries",
+        content=b'{"tracker_id": %d, "note": "\\ud800"}' % tracker["id"],
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 422
+    assert authed.get("/a%00b").status_code in (200, 503)
+
+
+def test_null_archived_changes_nothing(authed, tracker):
+    url = f"/api/trackers/{tracker['id']}"
+    authed.patch(url, json={"archived": True})
+    assert authed.patch(url, json={"archived": None}).json()["archived_at"] is not None
+
+
 def test_invalid_time_zones_rejected(authed):
     for zone in ("Not/AZone", "../../etc/passwd", "America"):
         assert authed.get("/api/today", params={"tz": zone}).status_code == 422

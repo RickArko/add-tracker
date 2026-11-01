@@ -48,18 +48,21 @@ def register(
 ) -> UserOut:
     if not _signup_open(request, db):
         raise HTTPException(status_code=403, detail="This server isn't accepting new accounts.")
-    user = User(
-        username=body.username,
-        password_hash=hash_password(body.password),
-        created_at=now_utc(),
-    )
-    db.add(user)
-    try:
-        db.flush()
-    except IntegrityError as exc:
-        raise HTTPException(status_code=409, detail="That username is taken.") from exc
-    start_session(db, user, request, response)
-    db.commit()
+    password_hash = hash_password(body.password)
+    # Held across the check and the insert, so parallel requests can't all pass as "first".
+    with request.app.state.signup_lock:
+        db.rollback()
+        if not _signup_open(request, db):
+            raise HTTPException(status_code=403, detail="This server isn't accepting new accounts.")
+        user = User(username=body.username, password_hash=password_hash, created_at=now_utc())
+        db.add(user)
+        try:
+            db.flush()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="That username is taken.") from exc
+        start_session(db, user, request, response)
+        db.commit()
     return UserOut(username=user.username)
 
 
@@ -69,11 +72,10 @@ def login(
 ) -> UserOut:
     username = body.username.strip().lower()
     throttle = request.app.state.login_throttle
-    if throttle.blocked(username):
+    if not throttle.reserve(username):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in 15 minutes.")
     user = db.scalar(select(User).where(User.username == username))
     if not verify_password(user.password_hash if user else None, body.password):
-        throttle.record_failure(username)
         raise HTTPException(status_code=401, detail="Username or passphrase is incorrect.")
     throttle.reset(username)
     start_session(db, user, request, response)

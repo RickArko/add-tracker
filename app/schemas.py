@@ -112,7 +112,7 @@ class TodayTracker(TrackerOut):
 
 
 class EntryCreate(StrictBody):
-    tracker_id: int
+    tracker_id: Annotated[int, Field(ge=1, le=2**63 - 1)]
     kind: EntryKind = "use"
     occurred_at: AwareDatetime | None = None
     amount: Amount | None = None
