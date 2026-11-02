@@ -21,7 +21,9 @@ const error = ref("");
 const busy = ref(false);
 
 const showLimit = computed(() => form.goal !== "quit");
-const lastDay = yesterday();
+// A saved date can pass yesterday after travelling west, and mustn't block saving other changes.
+const saved = props.tracker?.stopped_on ?? "";
+const lastDay = saved > yesterday() ? saved : yesterday();
 const safety = computed(() => safetyNote(form.category));
 
 function choose(preset: Preset) {

@@ -431,6 +431,21 @@ test("already stopped: time without use counts, with no daily chore", async ({ p
   expect(problems).toEqual([]);
 });
 
+test("already stopped: a date that's become today after travelling west doesn't block a rename", async ({ page }) => {
+  await register(page);
+  await addStoppedKratom(page);
+  const today = await page.evaluate(() => new Date().toLocaleDateString("en-CA"));
+  const db = new DatabaseSync(process.env.TALLY_E2E_DB!);
+  db.prepare("UPDATE trackers SET stopped_on = ? WHERE name = 'Kratom'").run(today);
+  db.close();
+  await page.goto("/settings");
+  const row = page.locator('[data-tracker="Kratom"]');
+  await row.getByRole("button", { name: "Edit" }).click();
+  await row.getByLabel("Name").fill("Kratom tea");
+  await row.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.locator('[data-tracker="Kratom tea"]').getByRole("button", { name: "Edit" })).toBeVisible();
+});
+
 test("already stopped: a logged use lowers nothing, and removing it clears the note", async ({ page }) => {
   await register(page);
   await addStoppedKratom(page);
