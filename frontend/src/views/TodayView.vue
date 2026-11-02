@@ -21,6 +21,9 @@ const today = ref(new Date());
 let toastTimer: number | undefined;
 // Logs still being sent. A reload during one would overwrite its optimistic count.
 let pendingLogs = 0;
+// Moves on with each load and each tap, so a reply that's been overtaken can be ignored.
+let latestLoad = 0;
+let loadsRunning = 0;
 let reloadWhenSettled = false;
 
 const editingTracker = computed(() =>
@@ -32,19 +35,19 @@ async function load() {
     reloadWhenSettled = true;
     return;
   }
+  const thisLoad = ++latestLoad;
+  loadsRunning += 1;
   today.value = new Date();
-  const refused = await flushQueue();
-  if (refused) showToast(`${refused} waiting ${refused === 1 ? "log was" : "logs were"} refused by the server, so check History.`);
   try {
+    const refused = await flushQueue();
+    if (refused) showToast(`${refused} waiting ${refused === 1 ? "log was" : "logs were"} refused by the server, so check History.`);
     const fresh = await api<TodayTracker[]>(`/api/today?tz=${encodeURIComponent(timeZone())}`);
-    if (pendingLogs > 0) {
-      reloadWhenSettled = true;
-      return;
-    }
+    if (thisLoad !== latestLoad) return;
     cacheToday(fresh);
     trackers.value = withQueue(fresh);
     loadError.value = "";
   } catch (e) {
+    if (thisLoad !== latestLoad) return;
     const saved = isRetryable(e) ? cachedToday() : null;
     if (saved) {
       trackers.value = withQueue(saved);
@@ -52,6 +55,8 @@ async function load() {
     } else {
       loadError.value = e instanceof ApiError ? e.message : "Today's log didn't load.";
     }
+  } finally {
+    loadsRunning -= 1;
   }
   waiting.value = waitingLogs().length;
   loaded.value = true;
@@ -74,6 +79,9 @@ function adjust(tracker: TodayTracker, kind: "use" | "urge", direction: 1 | -1) 
 
 async function log(tracker: TodayTracker, kind: "use" | "urge") {
   pendingLogs += 1;
+  // A load already running read the server before this tap, so its reply is out of date.
+  latestLoad += 1;
+  if (loadsRunning > 0) reloadWhenSettled = true;
   const clientId = crypto.randomUUID();
   const tappedAt = new Date().toISOString();
   enqueue({ client_id: clientId, tracker_id: tracker.id, kind, occurred_at: tappedAt });

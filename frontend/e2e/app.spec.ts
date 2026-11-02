@@ -326,6 +326,47 @@ test("a lost reply can't double count, because a resend is recognised", async ({
   await expect(page.getByText("6 of 90 mg today")).toBeVisible();
 });
 
+/** Holds the next Today reply, already read from the server, until release is called. */
+async function holdNextToday(page: Page) {
+  let release = async () => {};
+  const held = new Promise<void>((ready) => {
+    void page.route("**/api/today*", async (route) => {
+      const reply = await route.fetch();
+      release = () => route.fulfill({ response: reply });
+      ready();
+    }, { times: 1 });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await held;
+  return async () => {
+    await release();
+    // Leave time for the old reply to be applied, if it's going to be.
+    await page.waitForTimeout(250);
+  };
+}
+
+test("a log made while Today is refreshing isn't wiped by the older reply", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  const release = await holdNextToday(page);
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Logged 6 mg")).toBeVisible();
+  await release();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+});
+
+test("an older Today reply can't replace a newer one", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Logged 6 mg")).toBeVisible();
+  const release = await holdNextToday(page);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+  await release();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+});
+
 test("a blank day earns nothing until it's confirmed", async ({ page }) => {
   await register(page);
   await addZyn(page);
