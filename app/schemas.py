@@ -79,6 +79,7 @@ class TrackerCreate(StrictBody):
     default_amount: Amount = 1
     daily_limit: Limit | None = None
     stopped_on: date | None = None
+    standard_drinks: bool = False
 
 
 class TrackerUpdate(StrictBody):
@@ -89,6 +90,7 @@ class TrackerUpdate(StrictBody):
     default_amount: Amount | None = None
     daily_limit: Limit | None = None
     stopped_on: date | None = None
+    standard_drinks: bool | None = None
     archived: bool | None = None
 
 
@@ -109,6 +111,7 @@ class TrackerOut(BaseModel):
     clear_days: int | None
     plan_started_on: str | None
     stopped_on: str | None
+    standard_drinks_from: str | None
 
 
 class NoUseBody(StrictBody):
@@ -121,12 +124,26 @@ class PlanBody(StrictBody):
     clear_days: Annotated[int, Field(ge=1, le=90)] = 7
 
 
+class Drink(StrictBody):
+    name: Name
+    servings: Annotated[int, Field(ge=1, le=50)] = 1
+    serving_ml: Annotated[float, Field(gt=0, le=5000)]
+    abv: Annotated[float, Field(gt=0, le=100)]
+
+
+class RecentDrink(BaseModel):
+    name: str
+    serving_ml: float
+    abv: float
+
+
 class TodayTracker(TrackerOut):
     uses_today: int
     amount_today: float
     urges_today: int
     last_use_at: datetime | None
     game: dict
+    recent_drinks: list[RecentDrink] = []
 
 
 class EntryCreate(StrictBody):
@@ -134,6 +151,7 @@ class EntryCreate(StrictBody):
     kind: EntryKind = "use"
     occurred_at: AwareDatetime | None = None
     amount: Amount | None = None
+    drink: Drink | None = None
     craving: Craving | None = None
     trigger: Trigger | None = None
     note: Note | None = None
@@ -143,6 +161,7 @@ class EntryCreate(StrictBody):
 class EntryUpdate(StrictBody):
     occurred_at: AwareDatetime | None = None
     amount: Amount | None = None
+    drink: Drink | None = None
     craving: Craving | None = None
     trigger: Trigger | None = None
     note: Note | None = None
@@ -166,3 +185,7 @@ class EntryOut(BaseModel):
     craving: int | None
     trigger: str | None
     note: str | None
+    drink_name: str | None
+    servings: int | None
+    serving_ml: float | None
+    abv: float | None

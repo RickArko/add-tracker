@@ -1,5 +1,6 @@
-import { api, ApiError, type Entry, type Stopped, type TodayTracker } from "./api";
+import { api, ApiError, type Drink, type Entry, type Stopped, type TodayTracker } from "./api";
 import { auth } from "./auth";
+import { drinkAmount } from "./drinks";
 
 /**
  * Lets logging work with no signal. A log the server didn't get waits here with the time it was
@@ -10,6 +11,7 @@ export interface QueuedLog {
   tracker_id: number;
   kind: "use" | "urge";
   occurred_at: string;
+  drink?: Drink;
   /** Undone while its fate was unknown, so the server copy must go if it arrived. */
   cancelled?: boolean;
 }
@@ -160,7 +162,7 @@ export function addToCachedToday(entry: Entry) {
       stopped.days_with_use += 1;
       stopped.current_days = 0;
     }
-    tracker.uses_today += 1;
+    tracker.uses_today += entry.servings ?? 1;
     tracker.amount_today += entry.amount ?? 0;
     tracker.last_use_at = entry.occurred_at;
   } else {
@@ -179,8 +181,8 @@ export function withQueue(trackers: TodayTracker[]): TodayTracker[] {
     if (log.kind === "use") tracker.last_use_at = log.occurred_at;
     if (localDay(new Date(log.occurred_at)) !== today) continue;
     if (log.kind === "use") {
-      tracker.uses_today += 1;
-      tracker.amount_today += tracker.default_amount;
+      tracker.uses_today += log.drink?.servings ?? 1;
+      tracker.amount_today += log.drink ? drinkAmount(log.drink) : tracker.default_amount;
     } else {
       tracker.urges_today += 1;
     }

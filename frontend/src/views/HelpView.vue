@@ -35,6 +35,7 @@ import { auth } from "../lib/auth";
     <section>
       <h2>Using this app</h2>
       <p>Levels are a pace you set yourself, not medical advice. They aren't offered for alcohol, benzodiazepines or opioids, because tapering those safely needs a clinician. If stepping down makes you unwell, move your limit back up in Settings and talk to a clinician. Nothing is lost.</p>
+      <p>A standard drink here is the US measure of 14 g of alcohol, worked out from the size and strength you enter. It's an estimate, not a safe level, and it can't tell you how impaired you are or whether you're safe to drive.</p>
       <p>Habit Helper is a personal log. It doesn't diagnose, treat or give dosing advice, and any limit you set is your own, not a safe level. A log is only information. A day over your limit doesn't erase your progress, and it can show you what to plan for next time.</p>
     </section>
 

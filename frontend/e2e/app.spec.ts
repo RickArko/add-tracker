@@ -32,6 +32,8 @@ async function register(page: Page, name = unique()) {
 
 async function addAlcohol(page: Page) {
   await page.getByRole("button", { name: "Alcohol" }).click();
+  // Opting out, so these tests also show a plain tracker behaves as it always has.
+  await page.getByLabel("Count in standard drinks").uncheck();
   await page.getByLabel("Daily limit").fill("2");
   await page.getByRole("button", { name: "Start tracking" }).click();
   await expect(page.getByRole("heading", { name: "Alcohol" })).toBeVisible();
@@ -52,6 +54,7 @@ test("the core loop: track, log, undo, add details, see trends and history", asy
   // Safety note appears for a goal where sudden stopping can be dangerous.
   await page.getByRole("button", { name: "Alcohol" }).click();
   await expect(page.getByText("sharply cutting back can cause seizures")).toBeVisible();
+  await page.getByLabel("Count in standard drinks").uncheck();
   await page.getByLabel("Daily limit").fill("2");
   await page.getByRole("button", { name: "Start tracking" }).click();
 
@@ -208,6 +211,7 @@ test("nicotine pouches count in mg, with a daily mg limit", async ({ page }) => 
 test("changing the unit on another preset updates the limit label", async ({ page }) => {
   await register(page);
   await page.getByRole("button", { name: "Alcohol" }).click();
+  await page.getByLabel("Count in standard drinks").uncheck();
   await page.getByLabel("Count it in").fill("ml");
   await expect(page.getByLabel("Daily limit (ml)")).toBeVisible();
 });
@@ -366,6 +370,144 @@ test("an older Today reply can't replace a newer one", async ({ page }) => {
   await release();
   await expect(page.getByText("0 of 90 mg today")).toBeVisible();
 });
+
+async function addStandardDrinks(page: Page) {
+  await page.getByRole("button", { name: "Alcohol" }).click();
+  await page.getByLabel("Daily limit").fill("2");
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page.getByRole("button", { name: "Log 1 standard drink" })).toBeVisible();
+}
+
+async function chooseThreeIpas(page: Page) {
+  await page.getByRole("button", { name: "Choose a drink" }).click();
+  await page.getByRole("button", { name: "IPA", exact: true }).click();
+  await page.getByLabel("How many").fill("3");
+  await expect(page.getByText("3 × 355 ml at 6.5% = 3.9 standard drinks")).toBeVisible();
+  await page.getByRole("button", { name: "Log it" }).click();
+}
+
+test("drinks: choose, undo, repeat in one tap, edit, and see it in history", async ({ page }) => {
+  const problems = watchPage(page);
+  await register(page);
+  await addStandardDrinks(page);
+
+  await chooseThreeIpas(page);
+  await expect(page.getByText("Logged 3 × IPA, 3.9 standard drinks")).toBeVisible();
+  await expect(page.getByText("3.9 of 2 standard drinks today")).toBeVisible();
+  await expect(page.getByRole("img", { name: "3 logged" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("0 of 2 standard drinks today")).toBeVisible();
+  await expect(page.getByRole("img", { name: /logged/ })).toBeHidden();
+
+  // Two kinds in a session are two logs, and each is remembered.
+  await chooseThreeIpas(page);
+  await page.getByRole("button", { name: "Choose a drink" }).click();
+  await page.getByRole("button", { name: "Champagne" }).click();
+  await page.getByLabel("How many").fill("2");
+  await page.getByLabel("Drink or brand").fill("Veuve");
+  await page.getByRole("button", { name: "Log it" }).click();
+  await expect(page.getByText("5.9 of 2 standard drinks today")).toBeVisible();
+  await page.getByRole("button", { name: "Veuve 1. Log 1 at 150 ml, 12%" }).click();
+  await expect(page.getByText("6.9 of 2 standard drinks today")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add details" }).click();
+  await page.getByLabel("How many").fill("2");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText("7.9 of 2 standard drinks today")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText("7.9 of 2 standard drinks today")).toBeVisible();
+  await page.goto("/history");
+  await expect(page.getByText("2 × Veuve, 2 standard drinks").first()).toBeVisible();
+  await page.goto("/trends");
+  await expect(page.getByText("Standard drinks are estimates, not safe levels")).toBeVisible();
+  expect(problems).toEqual([]);
+});
+
+test("drinks: an alcohol-free drink gets an explanation, not an error", async ({ page }) => {
+  await register(page);
+  await addStandardDrinks(page);
+  await page.getByRole("button", { name: "Choose a drink" }).click();
+  await page.getByRole("button", { name: "Beer", exact: true }).click();
+  await page.getByLabel("ABV (%)").fill("0");
+  await expect(page.getByText("Alcohol-free drinks don't need logging here.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Log it" })).toBeDisabled();
+  // A blank name stays in the sheet, rather than being refused by the server or lost offline.
+  await page.getByLabel("ABV (%)").fill("5");
+  await page.getByLabel("Drink or brand").fill("   ");
+  await page.getByRole("button", { name: "Log it" }).click();
+  await expect(page.getByRole("heading", { name: "Choose a drink" })).toBeVisible();
+  await expect(page.getByText("0 of 2 standard drinks today")).toBeAttached();
+});
+
+test("drinks: logged with no signal, it counts at once and arrives once", async ({ page }) => {
+  await register(page);
+  await addStandardDrinks(page);
+  await page.route("**/api/entries", (route) => route.abort("connectionreset"), { times: 1 });
+  await chooseThreeIpas(page);
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await expect(page.getByText("3.9 of 2 standard drinks today")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("waiting to send")).toBeHidden();
+  await page.reload();
+  await expect(page.getByText("3.9 of 2 standard drinks today")).toBeVisible();
+  await expect(page.getByRole("img", { name: "3 logged" })).toBeVisible();
+});
+
+test("drinks: an existing tracker opts in from Settings and keeps its limit and past", async ({ page }) => {
+  await register(page);
+  await addAlcohol(page);
+  await expect(page.getByRole("button", { name: "Choose a drink" })).toBeHidden();
+  await page.getByRole("button", { name: "Log 1 drink" }).click();
+  await expect(page.getByText("1 of 2 drinks today")).toBeVisible();
+  await page.goto("/settings");
+  const row = page.locator('[data-tracker="Alcohol"]');
+  await row.getByRole("button", { name: "Edit" }).click();
+  await row.getByLabel("Count in standard drinks").check();
+  await row.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("limit 2 standard drinks a day")).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText("1 of 2 standard drinks today")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose a drink" })).toBeVisible();
+});
+
+test("drinks: no menu for other trackers or for alcohol that has been stopped", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await expect(page.getByRole("button", { name: "Choose a drink" })).toBeHidden();
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Add something to track" }).click();
+  await page.getByRole("button", { name: "Alcohol" }).click();
+  await page.getByRole("radio", { name: /Stop/ }).check();
+  await page.getByLabel("Last time you used").fill("2025-09-20");
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await page.goto("/");
+  await expect(page.locator('[data-tracker="Alcohol"]').getByText("without use", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Choose a drink" })).toBeHidden();
+});
+
+for (const colorScheme of ["light", "dark"] as const) {
+  test(`drinks: the sheet is accessible and fits a phone, ${colorScheme}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 360, height: 740 });
+    await register(page);
+    await addStandardDrinks(page);
+    await chooseThreeIpas(page);
+    await expect(page.getByText("3.9 of 2 standard drinks today")).toBeVisible();
+    const fits = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(await fits()).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.getByRole("button", { name: "Choose a drink" }).click();
+    await page.getByRole("button", { name: "IPA", exact: true }).click();
+    expect(await fits()).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    const shots = process.env.TALLY_SHOTS;
+    if (shots) await page.screenshot({ path: `${shots}/drink-sheet-${colorScheme}.png` });
+    await page.getByRole("button", { name: "Cancel" }).click();
+    if (shots) await page.screenshot({ path: `${shots}/drink-today-${colorScheme}.png`, fullPage: true });
+  });
+}
 
 test("a blank day earns nothing until it's confirmed", async ({ page }) => {
   await register(page);

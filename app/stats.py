@@ -22,6 +22,15 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+ETHANOL_G_PER_ML = 0.789
+STANDARD_DRINK_G = 14
+
+
+def standard_drinks(servings: int, serving_ml: float, abv: float) -> float:
+    """An estimate, to the nearest 0.1 and never zero. frontend/src/lib/drinks.ts must match."""
+    exact = servings * serving_ml * abv / 100 * ETHANOL_G_PER_ML / STANDARD_DRINK_G
+    return max(0.1, math.floor(exact * 10 + 0.5) / 10)
+
 
 @dataclass(frozen=True)
 class EntryRow:
@@ -114,6 +123,9 @@ def compute_stats(
             uses_by_day[day] += 1
         else:
             urges_by_day[day] += 1
+    # Decimal amounts can sum to 3.3000000000000003, which mustn't miss a limit of 3.3.
+    for day, amount in amount_by_day.items():
+        amount_by_day[day] = round(amount, 3)
 
     ordered_periods = sorted(periods, key=lambda p: p.starts_on)
     current_limit = 0.0 if goal == "quit" else daily_limit

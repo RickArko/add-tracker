@@ -279,3 +279,11 @@ h3 { margin: 0; font-size: 1.1rem; }
 .milestone-bar i { display: block; height: 100%; background: var(--urge); border-radius: 4px; }
 .tracker-plan { flex: 1 1 100%; }
 .blank-day { display: flex; flex-direction: column; gap: 6px; background: var(--surface); padding: 12px 14px; border-radius: 10px; }
+
+/* Drinks */
+.drink-actions { margin-top: 2px; }
+.drink-actions small { margin-left: 4px; color: inherit; font-weight: 400; }
+.drink-numbers > .field { flex: 1 1 88px; min-width: 0; }
+.drink-preview { min-height: 3em; font-weight: 600; }
+.drink-preview small { display: block; font-weight: 400; color: var(--muted); }
+.standard-drinks { margin-bottom: 16px; }

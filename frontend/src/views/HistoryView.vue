@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { drinkLabel } from "../lib/drinks";
 import { computed, onMounted, ref, watch } from "vue";
 import EntryDialog from "../components/EntryDialog.vue";
 import { api, ApiError, type Entry, type Tracker } from "../lib/api";
@@ -30,7 +31,8 @@ const days = computed(() => {
 function describe(entry: Entry): string {
   const tracker = trackerFor(entry.tracker_id);
   if (entry.kind === "urge") return "Urge without use";
-  return tracker ? quantity(entry.amount ?? 0, tracker.unit) : String(entry.amount);
+  const amount = tracker ? quantity(entry.amount ?? 0, tracker.unit) : String(entry.amount);
+  return entry.drink_name ? `${drinkLabel(entry.drink_name, entry.servings ?? 1)}, ${amount}` : amount;
 }
 
 async function fetchPage(offset: number) {

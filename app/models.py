@@ -55,6 +55,8 @@ class Tracker(Base):
     plan_started_on: Mapped[str | None] = mapped_column(String(10))
     # The last day of use for someone who had already stopped. Days after it count on their word.
     stopped_on: Mapped[str | None] = mapped_column(String(10))
+    # The local day this tracker began counting in standard drinks. Earlier logs stay as they were.
+    standard_drinks_from: Mapped[str | None] = mapped_column(String(10))
 
     entries: Mapped[list["Entry"]] = relationship(
         back_populates="tracker", cascade="all, delete-orphan", passive_deletes=True
@@ -84,6 +86,11 @@ class Entry(Base):
     note: Mapped[str | None] = mapped_column(String(1000))
     # Set by the device, so resending a log whose reply was lost can't count it twice.
     client_id: Mapped[str | None] = mapped_column(String(64))
+    # What was drunk, copied here so a later catalog change can't rewrite history.
+    drink_name: Mapped[str | None] = mapped_column(String(60))
+    servings: Mapped[int | None] = mapped_column(Integer)
+    serving_ml: Mapped[float | None] = mapped_column(Float)
+    abv: Mapped[float | None] = mapped_column(Float)
 
     tracker: Mapped[Tracker] = relationship(back_populates="entries")
 

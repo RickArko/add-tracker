@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import DrinkDialog from "../components/DrinkDialog.vue";
 import EntryDialog from "../components/EntryDialog.vue";
 import TallyMarks from "../components/TallyMarks.vue";
 import TrackerForm from "../components/TrackerForm.vue";
-import { api, ApiError, timeZone, type Entry, type TodayTracker, type Tracker } from "../lib/api";
+import { api, ApiError, timeZone, type Drink, type Entry, type TodayTracker, type Tracker } from "../lib/api";
 import { dayCount, duration, formatNumber, fullDate, longDate, quantity, shortDate, timeSince, unitLabel } from "../lib/format";
 import { safetyNote } from "../lib/catalog";
+import { drinkAmount, drinkLabel, standardDrinks } from "../lib/drinks";
 import {
   addToCachedToday, cachedToday, cacheToday, cancelQueued, enqueue, flushQueue, isRetryable,
   removeFromQueue, waitingLogs, withQueue,
@@ -16,6 +18,7 @@ const loaded = ref(false);
 const loadError = ref("");
 const waiting = ref(0);
 const editing = ref<Entry | null>(null);
+const choosingDrinkFor = ref<number | null>(null);
 const toast = ref<{ text: string; entry?: Entry; queuedId?: string } | null>(null);
 const today = ref(new Date());
 let toastTimer: number | undefined;
@@ -68,40 +71,49 @@ function showToast(text: string, extra: { entry?: Entry; queuedId?: string } = {
   toastTimer = window.setTimeout(() => (toast.value = null), 8000);
 }
 
-function adjust(tracker: TodayTracker, kind: "use" | "urge", direction: 1 | -1) {
+function adjust(tracker: TodayTracker, kind: "use" | "urge", direction: 1 | -1, drink?: Drink) {
   if (kind === "use") {
-    tracker.uses_today += direction;
-    tracker.amount_today += direction * tracker.default_amount;
+    tracker.uses_today += direction * (drink?.servings ?? 1);
+    tracker.amount_today += direction * (drink ? drinkAmount(drink) : tracker.default_amount);
   } else {
     tracker.urges_today += direction;
   }
 }
 
-async function log(tracker: TodayTracker, kind: "use" | "urge") {
+async function log(tracker: TodayTracker, kind: "use" | "urge", drink?: Drink) {
   pendingLogs += 1;
   // A load already running read the server before this tap, so its reply is out of date.
   latestLoad += 1;
   if (loadsRunning > 0) reloadWhenSettled = true;
   const clientId = crypto.randomUUID();
   const tappedAt = new Date().toISOString();
-  enqueue({ client_id: clientId, tracker_id: tracker.id, kind, occurred_at: tappedAt });
+  enqueue({
+    client_id: clientId,
+    tracker_id: tracker.id,
+    kind,
+    occurred_at: tappedAt,
+    ...(drink ? { drink } : {}),
+  });
   // Update first, so a tap feels instant even on a slow connection.
-  adjust(tracker, kind, 1);
+  adjust(tracker, kind, 1, drink);
   try {
     const entry = await api<Entry>("/api/entries", "POST", {
       tracker_id: tracker.id,
       kind,
       client_id: clientId,
+      ...(drink ? { drink } : {}),
     });
     removeFromQueue(clientId);
     addToCachedToday(entry);
+    const logged = quantity(entry.amount ?? 0, tracker.unit);
     showToast(
-      kind === "use" ? `Logged ${quantity(entry.amount ?? 0, tracker.unit)}` : "Logged urge",
+      kind !== "use" ? "Logged urge" : drink ? `Logged ${drinkLabel(drink.name, drink.servings)}, ${logged}` : `Logged ${logged}`,
       { entry },
     );
     if (kind === "use") tracker.last_use_at = entry.occurred_at;
     // The day counts come from the server.
-    if (tracker.game.stopped) reloadWhenSettled = true;
+    // So do the recent drinks.
+    if (tracker.game.stopped || drink) reloadWhenSettled = true;
   } catch (e) {
     if (isRetryable(e)) {
       waiting.value = waitingLogs().length;
@@ -109,7 +121,7 @@ async function log(tracker: TodayTracker, kind: "use" | "urge") {
       showToast("Saved on this device. It'll send when you're back online.", { queuedId: clientId });
     } else {
       removeFromQueue(clientId);
-      adjust(tracker, kind, -1);
+      adjust(tracker, kind, -1, drink);
       showToast(e instanceof ApiError ? e.message : "That didn't save. Try again.");
     }
   } finally {
@@ -119,6 +131,12 @@ async function log(tracker: TodayTracker, kind: "use" | "urge") {
       void load();
     }
   }
+}
+
+/** Looked up on choosing, because a refresh may have replaced the row while the sheet was open. */
+function logChosenDrink(trackerId: number | null, drink: Drink) {
+  const tracker = trackers.value.find((t) => t.id === trackerId);
+  if (tracker) void log(tracker, "use", drink);
 }
 
 async function undo(entry: Entry) {
@@ -299,6 +317,19 @@ onBeforeUnmount(() => {
           </button>
           <button class="log-urge" type="button" @click="log(t, 'urge')">Had an urge, didn't use</button>
         </div>
+        <div v-if="t.standard_drinks_from" class="chips drink-actions">
+          <button
+            v-for="recent in t.recent_drinks ?? []"
+            :key="`${recent.name}:${recent.serving_ml}:${recent.abv}`"
+            type="button"
+            class="chip"
+            :aria-label="`${recent.name} ${formatNumber(standardDrinks(1, recent.serving_ml, recent.abv))}. Log 1 at ${recent.serving_ml} ml, ${recent.abv}%`"
+            @click="log(t, 'use', { ...recent, servings: 1 })"
+          >
+            {{ recent.name }} <small>{{ formatNumber(standardDrinks(1, recent.serving_ml, recent.abv)) }}</small>
+          </button>
+          <button type="button" class="chip" @click="choosingDrinkFor = t.id">Choose a drink</button>
+        </div>
         </template>
       </li>
     </ul>
@@ -316,6 +347,12 @@ onBeforeUnmount(() => {
       </template>
       <button v-else-if="toast.queuedId" type="button" class="link" @click="undoQueued(toast.queuedId!)">Undo</button>
     </div>
+
+    <DrinkDialog
+      v-if="choosingDrinkFor !== null"
+      @close="choosingDrinkFor = null"
+      @chosen="logChosenDrink(choosingDrinkFor, $event)"
+    />
 
     <EntryDialog
       v-if="editing"

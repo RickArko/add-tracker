@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { api, ApiError, type Entry, type Tracker } from "../lib/api";
 import { TRIGGERS } from "../lib/catalog";
+import DrinkFields, { type DrinkForm } from "./DrinkFields.vue";
 import { toLocalInput } from "../lib/format";
 
 const props = defineProps<{ entry: Entry; tracker: Tracker | undefined }>();
@@ -11,6 +12,16 @@ const dialog = ref<HTMLDialogElement>();
 const original = toLocalInput(new Date(props.entry.occurred_at));
 const occurredAt = ref(original);
 const amount = ref<number | "">(props.entry.amount ?? "");
+const drink = ref<DrinkForm | null>(
+  props.entry.drink_name
+    ? {
+        name: props.entry.drink_name,
+        servings: props.entry.servings ?? 1,
+        serving_ml: props.entry.serving_ml ?? "",
+        abv: props.entry.abv ?? "",
+      }
+    : null,
+);
 const craving = ref<number | null>(props.entry.craving);
 const trigger = ref(props.entry.trigger ?? "");
 const note = ref(props.entry.note ?? "");
@@ -48,7 +59,12 @@ const save = () =>
       trigger: trigger.value,
       note: note.value,
     };
-    if (props.entry.kind === "use") body.amount = amount.value === "" ? null : amount.value;
+    if (drink.value) {
+      if (!drink.value.abv) throw new ApiError(422, "Alcohol-free drinks don't need logging here.");
+      body.drink = drink.value;
+    } else if (props.entry.kind === "use") {
+      body.amount = amount.value === "" ? null : amount.value;
+    }
     if (occurredAt.value !== original) body.occurred_at = new Date(occurredAt.value).toISOString();
     emit("saved", await api<Entry>(`/api/entries/${props.entry.id}`, "PATCH", body));
   });
@@ -70,11 +86,13 @@ const remove = () =>
           <span>When</span>
           <input v-model="occurredAt" type="datetime-local" :max="nowMax" required />
         </label>
-        <label v-if="entry.kind === 'use'" class="field amount">
+        <label v-if="entry.kind === 'use' && !drink" class="field amount">
           <span>Amount<template v-if="tracker"> ({{ tracker.unit }})</template></span>
           <input v-model.number="amount" type="number" min="0.01" step="any" inputmode="decimal" required />
         </label>
       </div>
+
+      <DrinkFields v-if="drink" v-model="drink" />
 
       <fieldset class="field">
         <legend>How strong was the craving? <small>0 is none, 10 is the strongest</small></legend>
