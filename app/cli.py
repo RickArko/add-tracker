@@ -117,6 +117,23 @@ def seed_demo(session: Session) -> None:
                         trigger=rng.choice(triggers),
                     )
                 )
+    tracker = Tracker(
+        user_id=user.id,
+        name="Kratom",
+        category="opioid",
+        goal="quit",
+        unit="dose",
+        default_amount=1,
+        created_at=now,
+        stopped_on=(now - timedelta(days=400)).date().isoformat(),
+    )
+    session.add(tracker)
+    session.flush()
+    session.add(
+        LimitPeriod(
+            tracker_id=tracker.id, starts_on=now.date().isoformat(), goal="quit", daily_limit=None
+        )
+    )
     session.commit()
     print(f"Seeded. Log in as {DEMO_USER} / {DEMO_PASSWORD}")
 

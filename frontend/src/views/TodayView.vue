@@ -4,7 +4,8 @@ import EntryDialog from "../components/EntryDialog.vue";
 import TallyMarks from "../components/TallyMarks.vue";
 import TrackerForm from "../components/TrackerForm.vue";
 import { api, ApiError, timeZone, type Entry, type TodayTracker, type Tracker } from "../lib/api";
-import { duration, formatNumber, longDate, quantity, shortDate, timeSince, unitLabel } from "../lib/format";
+import { dayCount, duration, formatNumber, fullDate, longDate, quantity, shortDate, timeSince, unitLabel } from "../lib/format";
+import { safetyNote } from "../lib/catalog";
 import {
   addToCachedToday, cachedToday, cacheToday, cancelQueued, enqueue, flushQueue, isRetryable,
   removeFromQueue, waitingLogs, withQueue,
@@ -20,6 +21,9 @@ const today = ref(new Date());
 let toastTimer: number | undefined;
 // Logs still being sent. A reload during one would overwrite its optimistic count.
 let pendingLogs = 0;
+// Moves on with each load and each tap, so a reply that's been overtaken can be ignored.
+let latestLoad = 0;
+let loadsRunning = 0;
 let reloadWhenSettled = false;
 
 const editingTracker = computed(() =>
@@ -31,19 +35,19 @@ async function load() {
     reloadWhenSettled = true;
     return;
   }
+  const thisLoad = ++latestLoad;
+  loadsRunning += 1;
   today.value = new Date();
-  const refused = await flushQueue();
-  if (refused) showToast(`${refused} waiting ${refused === 1 ? "log was" : "logs were"} refused by the server, so check History.`);
   try {
+    const refused = await flushQueue();
+    if (refused) showToast(`${refused} waiting ${refused === 1 ? "log was" : "logs were"} refused by the server, so check History.`);
     const fresh = await api<TodayTracker[]>(`/api/today?tz=${encodeURIComponent(timeZone())}`);
-    if (pendingLogs > 0) {
-      reloadWhenSettled = true;
-      return;
-    }
+    if (thisLoad !== latestLoad) return;
     cacheToday(fresh);
     trackers.value = withQueue(fresh);
     loadError.value = "";
   } catch (e) {
+    if (thisLoad !== latestLoad) return;
     const saved = isRetryable(e) ? cachedToday() : null;
     if (saved) {
       trackers.value = withQueue(saved);
@@ -51,6 +55,8 @@ async function load() {
     } else {
       loadError.value = e instanceof ApiError ? e.message : "Today's log didn't load.";
     }
+  } finally {
+    loadsRunning -= 1;
   }
   waiting.value = waitingLogs().length;
   loaded.value = true;
@@ -73,6 +79,9 @@ function adjust(tracker: TodayTracker, kind: "use" | "urge", direction: 1 | -1) 
 
 async function log(tracker: TodayTracker, kind: "use" | "urge") {
   pendingLogs += 1;
+  // A load already running read the server before this tap, so its reply is out of date.
+  latestLoad += 1;
+  if (loadsRunning > 0) reloadWhenSettled = true;
   const clientId = crypto.randomUUID();
   const tappedAt = new Date().toISOString();
   enqueue({ client_id: clientId, tracker_id: tracker.id, kind, occurred_at: tappedAt });
@@ -91,6 +100,8 @@ async function log(tracker: TodayTracker, kind: "use" | "urge") {
       { entry },
     );
     if (kind === "use") tracker.last_use_at = entry.occurred_at;
+    // The day counts come from the server.
+    if (tracker.game.stopped) reloadWhenSettled = true;
   } catch (e) {
     if (isRetryable(e)) {
       waiting.value = waitingLogs().length;
@@ -185,6 +196,16 @@ async function stepDown(tracker: TodayTracker) {
   }
 }
 
+/** A use today shows at once, even if the server hasn't seen it yet. */
+function stoppedDays(t: TodayTracker) {
+  const s = t.game.stopped!;
+  return {
+    free: s.days_free,
+    current: t.uses_today > 0 ? 0 : s.current_days,
+    hadUse: t.uses_today > 0 || s.days_with_use > 0,
+  };
+}
+
 function limitNote(t: TodayTracker): string {
   if (t.daily_limit === null) return `${quantity(t.amount_today, t.unit)} today`;
   return `${formatNumber(t.amount_today)} of ${quantity(t.daily_limit, t.unit)} today`;
@@ -225,6 +246,22 @@ onBeforeUnmount(() => {
     <ul class="today-list">
       <li v-for="t in trackers" :key="t.id" class="today-row" :data-tracker="t.name">
         <h2>{{ t.name }}</h2>
+        <template v-if="t.game.stopped">
+          <p class="stopped-days">{{ dayCount(stoppedDays(t).free) }} without use</p>
+          <p class="today-facts">
+            <span>Since you stopped on {{ fullDate(t.game.stopped.since) }}</span>
+            <span v-if="stoppedDays(t).hadUse">Current stretch: {{ dayCount(stoppedDays(t).current) }}. Longest: {{ dayCount(t.game.stopped.longest_days) }}</span>
+            <span v-if="t.urges_today">{{ t.urges_today }} {{ t.urges_today === 1 ? "urge" : "urges" }} without use today</span>
+          </p>
+          <p v-if="t.uses_today && safetyNote(t.category)" class="safety" role="note">
+            {{ safetyNote(t.category) }} <RouterLink to="/help">Find support</RouterLink>
+          </p>
+          <div class="stopped-actions">
+            <button class="log-urge" type="button" @click="log(t, 'urge')">Had an urge, didn't use</button>
+            <button class="quiet" type="button" @click="log(t, 'use')">Log a use</button>
+          </div>
+        </template>
+        <template v-else>
         <p class="tally-line">
           <TallyMarks v-if="t.uses_today" :count="t.uses_today" />
           <span v-else class="none-yet">No logs yet today</span>
@@ -262,6 +299,7 @@ onBeforeUnmount(() => {
           </button>
           <button class="log-urge" type="button" @click="log(t, 'urge')">Had an urge, didn't use</button>
         </div>
+        </template>
       </li>
     </ul>
 

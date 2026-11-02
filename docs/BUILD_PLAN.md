@@ -33,6 +33,8 @@ The game is for an analytical person who wants to play against their own numbers
 | A hard day never subtracts from a level, banked amount or record | A hard day can delay progress but can't take it away. Correcting a day that was already logged can change its figures, because accuracy comes first. |
 | No points, leaderboards, sharing, or daily-return rewards | These reward using the app rather than using less, and could add a compulsion |
 | No levels for alcohol, benzodiazepines or opioids, enforced on the server | Tapering these safely needs a clinician |
+| Someone who has already stopped gives their last-use date once, and days after it count without daily confirmation. This is the only exception to the blank-day rule, and only applies to a tracker with that date. | There's no taper to game here, and a daily "did you use?" chore would punish the people doing best |
+| The headline for a stopped tracker is total finished days without use, never the current run. Today counts once it's over, so a use can't lower the headline, longest stretch or a milestone. | Keeps "no streak that resets to zero" true when the number on screen is the thing being protected |
 
 ### Functional requirements
 
@@ -50,6 +52,7 @@ The game is for an analytical person who wants to play against their own numbers
 | F10 | Records and milestones that a hard day can't remove | `test_levels.py` |
 | F11 | Limit and goal history, so changing either doesn't rewrite past days | `test_levels.py` |
 | F12 | Logging with no signal, sent once when back online | `test_levels.py`, e2e offline and lost reply |
+| F13 | Already stopped: a Stop goal can carry a last-use date. Today and Trends then show days without use, longest stretch, urges and long-range milestones instead of use figures, and a use can still be logged and undone | `test_stopped.py`, e2e already stopped |
 
 ### Correctness rules
 
@@ -58,6 +61,7 @@ The game is for an analytical person who wants to play against their own numbers
 - Entries dated before 2000 or in the future are refused.
 - Week-on-week compares finished days only, so a part-finished today can't look like an improvement.
 - An entry stores its own amount, so changing a tracker's default later doesn't rewrite history.
+- A last-use date is stored as a date, not as an invented entry, because its amount and time aren't known. Days without use are finished local calendar days after it, so today isn't included until it's over. Days up to and including that date are never asked about as blank.
 
 ### Privacy and security requirements
 

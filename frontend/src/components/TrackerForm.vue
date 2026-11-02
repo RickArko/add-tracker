@@ -2,6 +2,7 @@
 import { computed, reactive, ref } from "vue";
 import { api, ApiError, timeZone, type Tracker } from "../lib/api";
 import { GOALS, PRESETS, safetyNote, type Preset } from "../lib/catalog";
+import { yesterday } from "../lib/format";
 
 const props = defineProps<{ tracker?: Tracker }>();
 const emit = defineEmits<{ saved: [Tracker]; cancel: [] }>();
@@ -13,12 +14,16 @@ const form = reactive({
   unit: props.tracker?.unit ?? "time",
   default_amount: props.tracker?.default_amount ?? (1 as number | ""),
   daily_limit: props.tracker?.daily_limit ?? ("" as number | ""),
+  stopped_on: props.tracker?.stopped_on ?? "",
 });
 const chosen = ref<string | null>(props.tracker ? "edit" : null);
 const error = ref("");
 const busy = ref(false);
 
 const showLimit = computed(() => form.goal !== "quit");
+// A saved date can pass yesterday after travelling west, and mustn't block saving other changes.
+const saved = props.tracker?.stopped_on ?? "";
+const lastDay = saved > yesterday() ? saved : yesterday();
 const safety = computed(() => safetyNote(form.category));
 
 function choose(preset: Preset) {
@@ -36,6 +41,7 @@ async function submit() {
     ...form,
     default_amount: form.default_amount === "" ? 1 : form.default_amount,
     daily_limit: !showLimit.value || form.daily_limit === "" ? null : form.daily_limit,
+    stopped_on: form.goal === "quit" && form.stopped_on ? form.stopped_on : null,
   };
   const tz = `?tz=${encodeURIComponent(timeZone())}`;
   try {
@@ -101,6 +107,13 @@ async function submit() {
       <label v-if="showLimit" class="field">
         <span>Daily limit ({{ form.unit || "units" }}) <small>Optional, and yours to set</small></span>
         <input v-model.number="form.daily_limit" type="number" min="0" step="any" inputmode="decimal" />
+      </label>
+
+      <label v-else class="field">
+        <span>Last time you used <small>Only if you've already stopped</small></span>
+        <input v-model="form.stopped_on" type="date" min="2000-01-01" :max="lastDay" :disabled="!!tracker?.step_amount" />
+        <small v-if="tracker?.step_amount">Turn off levels first to use this.</small>
+        <small v-else>Your time without it counts from this date, with nothing to log each day. Leave it empty if you're still working toward stopping.</small>
       </label>
 
       <p v-if="safety" class="safety" role="note">

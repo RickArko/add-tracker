@@ -16,6 +16,8 @@ export const PRESETS: Preset[] = [
   { label: "Cannabis", name: "Cannabis", category: "cannabis", unit: "session" },
   { label: "Caffeine", name: "Caffeine", category: "caffeine", unit: "cup" },
   { label: "Opioids", name: "Opioids", category: "opioid", unit: "dose" },
+  // Kratom acts on opioid receptors, so it gets the same tolerance note and no self-set taper.
+  { label: "Kratom", name: "Kratom", category: "opioid", unit: "dose" },
   { label: "Benzodiazepines", name: "Benzodiazepines", category: "benzodiazepine", unit: "dose" },
   { label: "Stimulants", name: "Stimulants", category: "stimulant", unit: "dose" },
   { label: "Gambling", name: "Gambling", category: "gambling", unit: "session" },

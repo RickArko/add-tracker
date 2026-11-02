@@ -1,4 +1,4 @@
-import { api, ApiError, type Entry, type TodayTracker } from "./api";
+import { api, ApiError, type Entry, type Stopped, type TodayTracker } from "./api";
 import { auth } from "./auth";
 
 /**
@@ -95,12 +95,57 @@ export function cacheToday(trackers: TodayTracker[]) {
   localStorage.setItem(todayKey(), JSON.stringify({ day: localDay(), trackers }));
 }
 
+/**
+ * Day counts from a saved copy, moved on through each day that has finished since it was saved.
+ * The server has already counted a use on the saved day. A use still waiting to send hasn't been
+ * counted, so its day earns nothing here and the figures can't drop when it arrives.
+ */
+export function advanceStopped(
+  stopped: Stopped,
+  savedDay: string,
+  today: string,
+  waitingUseDays: string[],
+  savedDayCounted = false,
+): Stopped {
+  const waiting = new Set(waitingUseDays);
+  const next = { ...stopped };
+  for (let at = new Date(savedDay); ; at = new Date(at.getTime() + 86_400_000)) {
+    const day = at.toISOString().slice(0, 10);
+    if (day >= today) return next;
+    if (day <= stopped.since) continue;
+    const counted = day === savedDay && savedDayCounted;
+    if (counted || waiting.has(day)) {
+      next.current_days = 0;
+      if (!counted) next.days_with_use += 1;
+    } else {
+      next.days_free += 1;
+      next.current_days += 1;
+      next.longest_days = Math.max(next.longest_days, next.current_days);
+    }
+  }
+}
+
 /** The last known Today, with the counts zeroed if it's from an earlier day. */
 export function cachedToday(): TodayTracker[] | null {
   const saved = read<{ day: string; trackers: TodayTracker[] } | null>(todayKey(), null);
   if (!saved) return null;
   if (saved.day === localDay()) return saved.trackers;
-  return saved.trackers.map((t) => ({ ...t, uses_today: 0, amount_today: 0, urges_today: 0 }));
+  const today = localDay();
+  return saved.trackers.map((t) => {
+    const waitingUseDays = waitingLogs()
+      .filter((log) => log.tracker_id === t.id && log.kind === "use")
+      .map((log) => localDay(new Date(log.occurred_at)));
+    return {
+      ...t,
+      game: {
+        ...t.game,
+        stopped: t.game.stopped && advanceStopped(t.game.stopped, saved.day, today, waitingUseDays, t.uses_today > 0),
+      },
+      uses_today: 0,
+      amount_today: 0,
+      urges_today: 0,
+    };
+  });
 }
 
 /** Keeps the saved copy current, so a reload with no signal still shows a log that got through. */
@@ -109,6 +154,12 @@ export function addToCachedToday(entry: Entry) {
   const tracker = trackers?.find((t) => t.id === entry.tracker_id);
   if (!trackers || !tracker) return;
   if (entry.kind === "use") {
+    // Matches the server, so this day counts once when the saved copy moves on.
+    const stopped = tracker.game.stopped;
+    if (stopped && tracker.uses_today === 0 && localDay() > stopped.since) {
+      stopped.days_with_use += 1;
+      stopped.current_days = 0;
+    }
     tracker.uses_today += 1;
     tracker.amount_today += entry.amount ?? 0;
     tracker.last_use_at = entry.occurred_at;

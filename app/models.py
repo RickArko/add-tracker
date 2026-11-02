@@ -53,6 +53,8 @@ class Tracker(Base):
     step_amount: Mapped[float | None] = mapped_column(Float)
     clear_days: Mapped[int | None] = mapped_column(Integer)
     plan_started_on: Mapped[str | None] = mapped_column(String(10))
+    # The last day of use for someone who had already stopped. Days after it count on their word.
+    stopped_on: Mapped[str | None] = mapped_column(String(10))
 
     entries: Mapped[list["Entry"]] = relationship(
         back_populates="tracker", cascade="all, delete-orphan", passive_deletes=True

@@ -326,6 +326,47 @@ test("a lost reply can't double count, because a resend is recognised", async ({
   await expect(page.getByText("6 of 90 mg today")).toBeVisible();
 });
 
+/** Holds the next Today reply, already read from the server, until release is called. */
+async function holdNextToday(page: Page) {
+  let release = async () => {};
+  const held = new Promise<void>((ready) => {
+    void page.route("**/api/today*", async (route) => {
+      const reply = await route.fetch();
+      release = () => route.fulfill({ response: reply });
+      ready();
+    }, { times: 1 });
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await held;
+  return async () => {
+    await release();
+    // Leave time for the old reply to be applied, if it's going to be.
+    await page.waitForTimeout(250);
+  };
+}
+
+test("a log made while Today is refreshing isn't wiped by the older reply", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  const release = await holdNextToday(page);
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Logged 6 mg")).toBeVisible();
+  await release();
+  await expect(page.getByText("6 of 90 mg today")).toBeVisible();
+});
+
+test("an older Today reply can't replace a newer one", async ({ page }) => {
+  await register(page);
+  await addZyn(page);
+  await page.getByRole("button", { name: "Log 6 mg" }).click();
+  await expect(page.getByText("Logged 6 mg")).toBeVisible();
+  const release = await holdNextToday(page);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+  await release();
+  await expect(page.getByText("0 of 90 mg today")).toBeVisible();
+});
+
 test("a blank day earns nothing until it's confirmed", async ({ page }) => {
   await register(page);
   await addZyn(page);
@@ -336,6 +377,133 @@ test("a blank day earns nothing until it's confirmed", async ({ page }) => {
   await expect(page.getByText("has no logs.").first()).toBeVisible();
   await page.getByRole("button", { name: "Yes, no use" }).click();
   await expect(page.getByText("saved as a day without use")).toBeVisible();
+});
+
+async function addStoppedKratom(page: Page, lastUse = "2025-09-20") {
+  await page.getByRole("button", { name: "Kratom" }).click();
+  await page.getByRole("radio", { name: /^Stop/ }).check();
+  await page.getByLabel("Last time you used").fill(lastUse);
+  await page.getByRole("button", { name: "Start tracking" }).click();
+  await expect(page.getByRole("button", { name: "Start tracking" })).toBeHidden();
+}
+
+/** Finished days after a date: today counts once it's over. */
+const finishedDaysSince = (isoDate: string) => {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const now = new Date();
+  return Math.round((Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) - Date.UTC(y, m - 1, d)) / 86_400_000) - 1;
+};
+
+test("already stopped: time without use counts, with no daily chore", async ({ page }) => {
+  const problems = watchPage(page);
+  await register(page);
+  await addStoppedKratom(page);
+  const days = finishedDaysSince("2025-09-20");
+  const row = page.locator('[data-tracker="Kratom"]');
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+  await expect(row.getByText("Since you stopped on Sep 20, 2025")).toBeVisible();
+
+  // None of the day-by-day tracking appears, even after blank days have passed.
+  const db = new DatabaseSync(process.env.TALLY_E2E_DB!);
+  db.exec("UPDATE trackers SET created_at = datetime('now', '-3 days')");
+  db.close();
+  await page.reload();
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+  await expect(page.getByText("has no logs.")).toBeHidden();
+  await expect(page.getByText("No logs yet today")).toBeHidden();
+
+  await row.getByRole("button", { name: "Had an urge, didn't use" }).click();
+  await expect(row.getByText("1 urge without use today")).toBeVisible();
+
+  await page.getByRole("link", { name: "Trends" }).click();
+  await expect(page.getByRole("heading", { name: `${days} days without use` })).toBeVisible();
+  await expect(page.getByText("Longest stretch", { exact: true })).toBeVisible();
+  await expect(page.getByText("Urges you got through")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Milestones" })).toBeVisible();
+  await expect(page.getByText(`${days} days of 730 days`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your records" })).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Use per day" })).toBeHidden();
+  await expect(page.getByText("No use logged in this period.")).toBeVisible();
+
+  await page.goto("/settings");
+  await expect(page.getByText("Stopped Sep 20, 2025")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Set up levels" })).toBeHidden();
+  expect(problems).toEqual([]);
+});
+
+test("already stopped: a date that's become today after travelling west doesn't block a rename", async ({ page }) => {
+  await register(page);
+  await addStoppedKratom(page);
+  const today = await page.evaluate(() => new Date().toLocaleDateString("en-CA"));
+  const db = new DatabaseSync(process.env.TALLY_E2E_DB!);
+  db.prepare("UPDATE trackers SET stopped_on = ? WHERE name = 'Kratom'").run(today);
+  db.close();
+  await page.goto("/settings");
+  const row = page.locator('[data-tracker="Kratom"]');
+  await row.getByRole("button", { name: "Edit" }).click();
+  await row.getByLabel("Name").fill("Kratom tea");
+  await row.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.locator('[data-tracker="Kratom tea"]').getByRole("button", { name: "Edit" })).toBeVisible();
+});
+
+test("already stopped: a logged use lowers nothing, and removing it clears the note", async ({ page }) => {
+  await register(page);
+  await addStoppedKratom(page);
+  const days = finishedDaysSince("2025-09-20");
+  const row = page.locator('[data-tracker="Kratom"]');
+
+  await row.getByRole("button", { name: "Log a use" }).click();
+  await expect(row.getByText(`Current stretch: 0 days. Longest: ${days} days`)).toBeVisible();
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+  await expect(row.getByRole("note")).toContainText("Tolerance drops quickly");
+  await page.reload();
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+
+  await page.getByRole("link", { name: "Trends" }).click();
+  await expect(page.getByRole("heading", { name: "Use per day" })).toBeVisible();
+  await expect(page.getByText("Days with use since then")).toBeVisible();
+
+  await page.getByRole("link", { name: "History" }).click();
+  await page.getByText("1 dose").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete entry" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Confirm delete" }).click();
+  await page.getByRole("link", { name: "Today" }).click();
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+  await expect(row.getByText("Current stretch")).toBeHidden();
+  await expect(row.getByRole("note")).toBeHidden();
+});
+
+test("already stopped: a use with no signal shows at once, and clearing the date goes back to logging", async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: "allow" });
+  const page = await context.newPage();
+  await register(page);
+  await addStoppedKratom(page);
+  const days = finishedDaysSince("2025-09-20");
+  const row = page.locator('[data-tracker="Kratom"]');
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await expect(row.getByText(`${days} days without use`)).toBeVisible();
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+  await page.waitForLoadState("networkidle");
+
+  await context.setOffline(true);
+  await row.getByRole("button", { name: "Log a use" }).click();
+  await expect(page.getByText("Saved on this device")).toBeVisible();
+  await expect(row.getByText(`Current stretch: 0 days. Longest: ${days} days`)).toBeVisible();
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(row.getByText("Current stretch")).toBeHidden();
+  await context.setOffline(false);
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await expect(page.getByText("waiting to send")).toBeHidden();
+
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByLabel("Last time you used").fill("");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await page.goto("/");
+  await expect(row.getByRole("button", { name: "Log 1 dose" })).toBeVisible();
+  await expect(row.getByText("without use", { exact: false })).toBeHidden();
+  await context.close();
 });
 
 test("a Wi-Fi login page answering for the server doesn't lose a waiting log", async ({ page }) => {
@@ -480,6 +648,11 @@ for (const colorScheme of ["light", "dark"] as const) {
     await page.getByRole("button", { name: "Set up levels" }).click();
     await page.getByRole("button", { name: "Save levels" }).click();
     await expect(page.getByText("Levels on:")).toBeVisible();
+    await page.getByRole("button", { name: "Add something to track" }).click();
+    await addStoppedKratom(page);
+    await page.goto("/");
+    await page.locator('[data-tracker="Kratom"]').getByRole("button", { name: "Log a use" }).click();
+    await expect(page.locator('[data-tracker="Kratom"]').getByRole("note")).toBeVisible();
 
     for (const path of ["/", "/trends", "/history", "/settings", "/help"]) {
       await page.goto(path);
@@ -490,6 +663,10 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
       if (path === "/trends") await page.getByRole("button", { name: "Zyn" }).click();
       if (path === "/trends") await expect(page.locator(".level-panel")).toBeVisible();
+      if (path === "/trends") {
+        await page.getByRole("button", { name: "Kratom" }).click();
+        await expect(page.getByText("Urges you got through")).toBeVisible();
+      }
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
       expect(results.violations.map((v) => `${path}: ${v.id} ${v.nodes[0].html}`)).toEqual([]);
       const overflow = await page.evaluate(

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { Game, Tracker } from "../lib/api";
-import { duration, formatNumber, quantity, shortDate } from "../lib/format";
+import { dayCount, duration, formatNumber, fullDate, quantity, shortDate } from "../lib/format";
 import TallyMarks from "./TallyMarks.vue";
 
 const props = defineProps<{ game: Game; tracker: Tracker }>();
 
 const level = computed(() => props.game.level);
 const records = computed(() => props.game.records);
+const stopped = computed(() => props.game.stopped);
 const unit = computed(() => props.tracker.unit);
 
 const LABELS: Record<string, { name: string; value: (n: number) => string }> = {
@@ -15,6 +16,7 @@ const LABELS: Record<string, { name: string; value: (n: number) => string }> = {
   urges: { name: "Urges without use", value: (n) => formatNumber(n) },
   within: { name: "Days within your goal", value: (n) => formatNumber(n) },
   logged: { name: "Days you logged", value: (n) => formatNumber(n) },
+  stopped: { name: "Longest stretch without use", value: (n) => dayCount(n) },
 };
 
 const milestones = computed(() =>
@@ -36,6 +38,29 @@ const trend = computed(() => {
 </script>
 
 <template>
+  <section v-if="stopped" class="level-panel">
+    <h2>{{ dayCount(stopped.days_free) }} without use</h2>
+    <p class="level-limit">Since you stopped on {{ fullDate(stopped.since) }}</p>
+    <dl class="facts">
+      <div v-if="stopped.days_with_use">
+        <dt>Current stretch</dt>
+        <dd>{{ dayCount(stopped.current_days) }}</dd>
+      </div>
+      <div>
+        <dt>Longest stretch</dt>
+        <dd>{{ dayCount(stopped.longest_days) }}</dd>
+      </div>
+      <div>
+        <dt>Urges you got through</dt>
+        <dd>{{ formatNumber(stopped.urges) }}</dd>
+      </div>
+      <div v-if="stopped.days_with_use">
+        <dt>Days with use since then</dt>
+        <dd>{{ formatNumber(stopped.days_with_use) }}</dd>
+      </div>
+    </dl>
+  </section>
+
   <section v-if="level" class="level-panel">
     <h2>Level {{ level.level }} of {{ level.total_levels }}</h2>
     <template v-if="level.at_zero">
@@ -72,7 +97,7 @@ const trend = computed(() => {
     </dl>
   </section>
 
-  <section>
+  <section v-if="!stopped">
     <h2>Your records</h2>
     <dl class="facts">
       <div v-if="records.lowest_day">

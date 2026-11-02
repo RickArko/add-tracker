@@ -9,6 +9,7 @@ Habit Helper is a personal log. It doesn't diagnose, treat or give dosing advice
 You need [uv](https://docs.astral.sh/uv/) and Node 24 on Linux, WSL or macOS (Apple silicon included).
 
 ```bash
+scripts/setup.sh  # once, and again if dependencies change
 scripts/dev.sh    # your real tracker at http://127.0.0.1:8000, data in data/tally.db
 scripts/demo.sh   # a throwaway copy with 60 days of made-up data at http://127.0.0.1:8001
                   # log in as demo / demo-passphrase
@@ -50,6 +51,6 @@ Fly needs exactly one machine, because SQLite and the login throttle live on tha
 
 ## Test
 
-`scripts/check.sh` runs linting, type checks, unit and API tests, and browser tests. Browser tests need `npx playwright install chromium` once, run inside `frontend/`.
+`scripts/check.sh` runs linting, type checks, unit and API tests, and browser tests. Run `scripts/setup.sh` once first. On Linux it may ask for sudo to install the system libraries Chromium needs.
 
 See [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md) for the product spec, architecture and roadmap.

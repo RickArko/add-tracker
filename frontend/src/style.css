@@ -149,6 +149,9 @@ input:not([type="radio"]), textarea {
 .log-use { min-height: 64px; background: var(--use); color: var(--on-use); font-size: 1.15rem; font-weight: 700; }
 .log-use:active { transform: translateY(1px); }
 .log-urge { min-height: 64px; border: 1.5px solid var(--urge); line-height: 1.2; font-size: 0.95rem; }
+.stopped-days { font-size: 1.75rem; line-height: 1.2; font-weight: 700; }
+.stopped-actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; margin-top: 10px; }
+.stopped-actions .quiet { align-self: center; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 
 .toast {
