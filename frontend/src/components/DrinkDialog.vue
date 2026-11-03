@@ -37,7 +37,7 @@ onMounted(() => dialog.value?.showModal());
             :key="option.name"
             type="button"
             class="chip"
-            :aria-pressed="type === option"
+            :aria-pressed="type?.name === option.name"
             @click="chooseType(option)"
           >
             {{ option.name }}

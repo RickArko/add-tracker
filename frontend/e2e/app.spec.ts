@@ -381,6 +381,7 @@ async function addStandardDrinks(page: Page) {
 async function chooseThreeIpas(page: Page) {
   await page.getByRole("button", { name: "Choose a drink" }).click();
   await page.getByRole("button", { name: "IPA", exact: true }).click();
+  await expect(page.getByRole("button", { name: "IPA", exact: true })).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("How many").fill("3");
   await expect(page.getByText("3 × 355 ml at 6.5% = 3.9 standard drinks")).toBeVisible();
   await page.getByRole("button", { name: "Log it" }).click();
