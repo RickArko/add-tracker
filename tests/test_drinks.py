@@ -227,3 +227,26 @@ def test_a_day_exactly_at_a_fractional_limit_counts_as_within_it():
     )
     within = next(m for m in stats["game"]["milestones"] if m["key"] == "within")
     assert within["value"] == 1
+
+
+@pytest.mark.parametrize(
+    ("amount", "limit", "expected"),
+    [(1.2346, 1.2346, 1), (1.0004, 1, 0)],
+)
+def test_limits_compare_totals_at_full_precision(amount, limit, expected):
+    # Rounding totals would push 1.2346 over its own limit and pull 1.0004 under a limit of 1.
+    now = datetime(2026, 1, 10, 12, tzinfo=UTC)
+    start = now - timedelta(days=5)
+    stats = compute_stats(
+        goal="manage",
+        daily_limit=limit,
+        created_at=start,
+        entries=[EntryRow("use", now - timedelta(days=1), amount)],
+        days=7,
+        tz=ZoneInfo("UTC"),
+        now=now,
+        periods=[PeriodRow(start.date(), "manage", limit)],
+    )
+    within = next(m for m in stats["game"]["milestones"] if m["key"] == "within")
+    assert within["value"] == expected
+    assert stats["summary"]["within_goal"]["days"] == expected
