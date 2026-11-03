@@ -13,11 +13,13 @@ from sqlalchemy.orm import Session
 from app.db import now_utc
 from app.models import Entry, LimitPeriod, NoUseDay, Tracker, User
 from app.schemas import (
+    Drink,
     EntryCreate,
     EntryOut,
     EntryUpdate,
     NoUseBody,
     PlanBody,
+    RecentDrink,
     TodayTracker,
     TrackerCreate,
     TrackerOut,
@@ -31,12 +33,14 @@ from app.stats import (
     compute_stats,
     day_bounds,
     next_level_limit,
+    standard_drinks,
 )
 
 router = APIRouter(prefix="/api", tags=["data"])
 
 # Tapering these can be dangerous, so the app never sets a pace for them.
 CLINICIAN_ONLY_TAPER = {"alcohol", "benzodiazepine", "opioid"}
+RECENT_DRINKS = 5
 
 # Tolerates clock skew between device and server, while still catching mistaken future dates.
 FUTURE_TOLERANCE = timedelta(minutes=5)
@@ -163,6 +167,22 @@ def _apply_stopped_on(tracker: Tracker, stopped_on: date | None, tz: ZoneInfo) -
     tracker.stopped_on = stopped_on.isoformat()
 
 
+STANDARD_DRINK_UNIT = "standard drink"
+
+
+def _apply_standard_drinks(tracker: Tracker, wanted: bool, tz: ZoneInfo) -> None:
+    """Applies to new logs only. It never touches past entries or the limit."""
+    if not wanted or tracker.category != "alcohol":
+        tracker.standard_drinks_from = None
+        if tracker.unit == STANDARD_DRINK_UNIT:
+            tracker.unit = "drink" if tracker.category == "alcohol" else "time"
+        return
+    if not tracker.standard_drinks_from:
+        tracker.standard_drinks_from = _local_today(tz)
+    tracker.unit = STANDARD_DRINK_UNIT
+    tracker.default_amount = 1
+
+
 def _plan_row(tracker: Tracker) -> PlanRow | None:
     plan = None
     if tracker.step_amount and tracker.baseline_amount and tracker.plan_started_on:
@@ -199,10 +219,14 @@ def create_tracker(
 ) -> TrackerOut:
     values = body.model_dump()
     stopped_on = values.pop("stopped_on")
+    wants_standard_drinks = values.pop("standard_drinks")
+    if wants_standard_drinks and values["category"] != "alcohol":
+        raise HTTPException(status_code=422, detail="Standard drinks are only for alcohol.")
     if values["goal"] == "quit":
         values["daily_limit"] = None
     tracker = Tracker(user_id=user.id, created_at=now_utc(), **values)
     _apply_stopped_on(tracker, stopped_on, tz)
+    _apply_standard_drinks(tracker, wants_standard_drinks, tz)
     db.add(tracker)
     _record_period(db, tracker, tz)
     db.commit()
@@ -225,6 +249,9 @@ def update_tracker(
             tracker.archived_at = now_utc() if archived else None
     new_stopped_on = changes.pop("stopped_on", None)
     stopped_on_sent = "stopped_on" in body.model_fields_set
+    wants_standard_drinks = changes.pop("standard_drinks", None)
+    if wants_standard_drinks and (changes.get("category") or tracker.category) != "alcohol":
+        raise HTTPException(status_code=422, detail="Standard drinks are only for alcohol.")
     for field, value in changes.items():
         if value is None and field != "daily_limit":
             raise HTTPException(status_code=422, detail=f"{field} can't be empty.")
@@ -235,6 +262,13 @@ def update_tracker(
         _apply_stopped_on(tracker, new_stopped_on, tz)
     elif tracker.goal != "quit":
         tracker.stopped_on = None
+    _apply_standard_drinks(
+        tracker,
+        bool(tracker.standard_drinks_from)
+        if wants_standard_drinks is None
+        else wants_standard_drinks,
+        tz,
+    )
     if tracker.step_amount and tracker.category in CLINICIAN_ONLY_TAPER:
         _clear_plan(tracker)
     _record_period(db, tracker, tz)
@@ -370,8 +404,14 @@ def today(
     ).all()
     ids = [t.id for t in trackers]
 
+    # Three beers logged together is one entry and three tally marks.
     totals = db.execute(
-        select(Entry.tracker_id, Entry.kind, func.count(), func.coalesce(func.sum(Entry.amount), 0))
+        select(
+            Entry.tracker_id,
+            Entry.kind,
+            func.sum(func.coalesce(Entry.servings, 1)),
+            func.coalesce(func.sum(Entry.amount), 0),
+        )
         .where(Entry.tracker_id.in_(ids), Entry.occurred_at >= start, Entry.occurred_at < end)
         .group_by(Entry.tracker_id, Entry.kind)
     ).all()
@@ -391,9 +431,24 @@ def today(
             urges_today=by_key.get((t.id, "urge"), (0, 0))[0],
             last_use_at=last_uses.get(t.id),
             game=_stats_for(db, t, 7, tz)["game"],
+            recent_drinks=_recent_drinks(db, t),
         )
         for t in trackers
     ]
+
+
+def _recent_drinks(db: Session, tracker: Tracker) -> list[RecentDrink]:
+    """Worked out from past entries, so export and deletion already cover them."""
+    if not tracker.standard_drinks_from or tracker.stopped_on:
+        return []
+    rows = db.execute(
+        select(Entry.drink_name, Entry.serving_ml, Entry.abv)
+        .where(Entry.tracker_id == tracker.id, Entry.drink_name.is_not(None))
+        .group_by(Entry.drink_name, Entry.serving_ml, Entry.abv)
+        .order_by(func.max(Entry.occurred_at).desc())
+        .limit(RECENT_DRINKS)
+    ).all()
+    return [RecentDrink(name=name, serving_ml=ml, abv=abv) for name, ml, abv in rows]
 
 
 # --- Entries ---
@@ -431,8 +486,17 @@ def create_entry(
             return existing
     occurred_at = body.occurred_at or now_utc()
     _check_entry_time(occurred_at)
+    if body.drink and body.kind != "use":
+        raise HTTPException(status_code=422, detail="Urges don't have a drink.")
+    if body.drink and body.amount is not None:
+        raise HTTPException(status_code=422, detail="Send a drink or an amount, not both.")
+    # Not tied to the setting: a drink queued offline must survive it being turned off meanwhile.
+    if body.drink and tracker.category != "alcohol":
+        raise HTTPException(status_code=422, detail="Only alcohol has drinks.")
     amount = None
-    if body.kind == "use":
+    if body.drink:
+        amount = standard_drinks(body.drink.servings, body.drink.serving_ml, body.drink.abv)
+    elif body.kind == "use":
         # Copied onto the entry, so editing the tracker's default later can't rewrite history.
         amount = body.amount if body.amount is not None else tracker.default_amount
     entry = Entry(
@@ -445,6 +509,8 @@ def create_entry(
         note=body.note or None,
         client_id=body.client_id,
     )
+    if body.drink:
+        _set_drink(entry, body.drink)
     db.add(entry)
     try:
         db.commit()
@@ -452,6 +518,14 @@ def create_entry(
         db.rollback()
         return _by_client_id(db, tracker.id, body.client_id)
     return entry
+
+
+def _set_drink(entry: Entry, drink: Drink) -> None:
+    entry.drink_name = drink.name
+    entry.servings = drink.servings
+    entry.serving_ml = drink.serving_ml
+    entry.abv = drink.abv
+    entry.amount = standard_drinks(drink.servings, drink.serving_ml, drink.abv)
 
 
 def _by_client_id(db: Session, tracker_id: int, client_id: str | None) -> Entry | None:
@@ -471,11 +545,24 @@ def update_entry(
     changes = body.model_dump(exclude_unset=True)
     if "occurred_at" in changes:
         _check_entry_time(changes["occurred_at"])
+    drink = body.drink
+    changes.pop("drink", None)
+    if drink:
+        if entry.kind != "use":
+            raise HTTPException(status_code=422, detail="Urges don't have a drink.")
+        if "amount" in changes:
+            raise HTTPException(status_code=422, detail="Send a drink or an amount, not both.")
+        if not entry.drink_name and entry.tracker.category != "alcohol":
+            raise HTTPException(status_code=422, detail="Only alcohol has drinks.")
+        _set_drink(entry, drink)
     if "amount" in changes:
         if entry.kind == "urge" and changes["amount"] is not None:
             raise HTTPException(status_code=422, detail="Urges don't have an amount.")
         if entry.kind == "use" and changes["amount"] is None:
             raise HTTPException(status_code=422, detail="Enter an amount.")
+        # A different amount typed by hand no longer describes the drink that was stored.
+        if entry.drink_name and changes["amount"] != entry.amount:
+            entry.drink_name = entry.servings = entry.serving_ml = entry.abv = None
     for field, value in changes.items():
         setattr(entry, field, value or None if field in ("trigger", "note") else value)
     db.commit()
@@ -544,7 +631,20 @@ def export_csv(user: User = Depends(current_user), db: Session = Depends(get_db)
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(
-        ["occurred_at_utc", "tracker", "kind", "amount", "unit", "craving", "trigger", "note"]
+        [
+            "occurred_at_utc",
+            "tracker",
+            "kind",
+            "amount",
+            "unit",
+            "craving",
+            "trigger",
+            "note",
+            "drink",
+            "servings",
+            "serving_ml",
+            "abv",
+        ]
     )
     for entry, tracker in _export_rows(db, user):
         writer.writerow(
@@ -557,6 +657,10 @@ def export_csv(user: User = Depends(current_user), db: Session = Depends(get_db)
                 "" if entry.craving is None else entry.craving,
                 _csv_safe(entry.trigger),
                 _csv_safe(entry.note),
+                _csv_safe(entry.drink_name),
+                "" if entry.servings is None else entry.servings,
+                "" if entry.serving_ml is None else entry.serving_ml,
+                "" if entry.abv is None else entry.abv,
             ]
         )
     return Response(

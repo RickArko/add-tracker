@@ -22,6 +22,20 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+ETHANOL_G_PER_ML = 0.789
+STANDARD_DRINK_G = 14
+
+
+def standard_drinks(servings: int, serving_ml: float, abv: float) -> float:
+    """An estimate, to the nearest 0.1 and never zero. frontend/src/lib/drinks.ts must match."""
+    exact = servings * serving_ml * abv / 100 * ETHANOL_G_PER_ML / STANDARD_DRINK_G
+    return max(0.1, math.floor(exact * 10 + 0.5) / 10)
+
+
+def within_limit(amount: float, limit: float) -> bool:
+    """Decimal amounts can sum to 3.3000000000000003, which mustn't miss a limit of 3.3."""
+    return amount <= limit or math.isclose(amount, limit, rel_tol=1e-9, abs_tol=1e-9)
+
 
 @dataclass(frozen=True)
 class EntryRow:
@@ -201,7 +215,10 @@ def compute_stats(
     within_goal = None
     if finished or current_limit is not None:
         within_goal = {
-            "days": sum(d["amount"] <= d["limit"] for d in finished),
+            "days": sum(
+                within_limit(amount_by_day.get(date.fromisoformat(d["date"]), 0), d["limit"])
+                for d in finished
+            ),
             "of": len(finished),
             "limit": current_limit,
         }
@@ -323,7 +340,9 @@ def _plan_progress(
     # level without undoing it.
     start = max(period_start or plan.started_on, plan.started_on)
     cleared = sum(
-        amount_by_day.get(day, 0) <= current_limit for day in tracked_days if day >= start
+        within_limit(amount_by_day.get(day, 0), current_limit)
+        for day in tracked_days
+        if day >= start
     )
     banked = sum(
         max(0.0, plan.baseline - amount_by_day.get(day, 0))
@@ -418,7 +437,7 @@ def _game(
     within = 0
     for day, amount in zip(tracked_days, amounts, strict=True):
         limit = limit_on(day)
-        if limit is not None and amount <= limit:
+        if limit is not None and within_limit(amount, limit):
             within += 1
 
     level = None

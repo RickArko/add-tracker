@@ -18,6 +18,14 @@ export interface Tracker {
   clear_days: number | null;
   plan_started_on: string | null;
   stopped_on: string | null;
+  standard_drinks_from: string | null;
+}
+
+export interface Drink {
+  name: string;
+  servings: number;
+  serving_ml: number;
+  abv: number;
 }
 
 export interface Level {
@@ -59,6 +67,8 @@ export interface Game {
 }
 
 export interface TodayTracker extends Tracker {
+  /** Absent from a Today saved on the device by an older version. */
+  recent_drinks?: Omit<Drink, "servings">[];
   uses_today: number;
   amount_today: number;
   urges_today: number;
@@ -75,6 +85,10 @@ export interface Entry {
   craving: number | null;
   trigger: string | null;
   note: string | null;
+  drink_name: string | null;
+  servings: number | null;
+  serving_ml: number | null;
+  abv: number | null;
 }
 
 export interface DayStat {

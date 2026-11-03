@@ -52,6 +52,9 @@ The game is for an analytical person who wants to play against their own numbers
 | F10 | Records and milestones that a hard day can't remove | `test_levels.py` |
 | F11 | Limit and goal history, so changing either doesn't rewrite past days | `test_levels.py` |
 | F12 | Logging with no signal, sent once when back online | `test_levels.py`, e2e offline and lost reply |
+| F14 | Standard drinks: an alcohol tracker can count in US standard drinks (14 g of ethanol) from a chosen day. It's on by default for a new Alcohol tracker and opt-in for an existing one, and never changes a limit or the amount of a past log. Past logs show under the tracker's current unit, as they do for any unit change | `test_drinks.py`, e2e drinks |
+| F15 | Choose a drink: type or typed-in brand, size, ABV and how many, with a preview, as one entry that can be undone and edited. Logging stays one tap, and recent drinks are one tap too | `test_drinks.py`, `drinks.test.ts`, e2e drinks |
+| F16 | A chosen drink logged with no signal counts correctly at once and is sent once when back online | `offline.test.ts`, e2e drinks |
 | F13 | Already stopped: a Stop goal can carry a last-use date. Today and Trends then show days without use, longest stretch, urges and long-range milestones instead of use figures, and a use can still be logged and undone | `test_stopped.py`, e2e already stopped |
 
 ### Correctness rules
@@ -62,6 +65,9 @@ The game is for an analytical person who wants to play against their own numbers
 - Week-on-week compares finished days only, so a part-finished today can't look like an improvement.
 - An entry stores its own amount, so changing a tracker's default later doesn't rewrite history.
 - A last-use date is stored as a date, not as an invented entry, because its amount and time aren't known. Days without use are finished local calendar days after it, so today isn't included until it's over. Days up to and including that date are never asked about as blank.
+- Standard drinks are servings x ml x ABV% x 0.789 / 14, rounded per entry to the nearest 0.1 with a minimum of 0.1, so two flutes that come to 2.03 don't pass a limit of 2 on false precision. They're estimates, never shown as safe levels, and the app never estimates blood alcohol or fitness to drive.
+- An entry stores its drink's name, servings, size and ABV, so nothing in a catalog can rewrite history. Tally marks add up servings, while the gap between uses still counts logs.
+- A tracker that has stopped keeps a plain "Log a use", with no drink menu to act as a cue. Brand names are text only, with no logos or sponsored order.
 
 ### Privacy and security requirements
 

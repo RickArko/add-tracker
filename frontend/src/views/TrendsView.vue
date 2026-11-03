@@ -138,6 +138,7 @@ onMounted(async () => {
         <section v-else>
           <h2>Use per day</h2>
           <p class="section-note">{{ quantity(summary.amount_in_window, tracker.unit) }} since {{ shortDate(stats.window_start) }}</p>
+          <p v-if="tracker.standard_drinks_from" class="section-note">Standard drinks are estimates, not safe levels. Counted this way since {{ shortDate(tracker.standard_drinks_from) }}, and earlier logs keep the amounts they were logged with.</p>
           <DailyChart :daily="stats.daily" :unit="tracker.unit" />
           <details class="table-view">
             <summary>Show as a table</summary>

@@ -7,10 +7,12 @@ export interface Preset {
   unit: string;
   /** What one tap logs, when that isn't 1. */
   amount?: number;
+  /** Starts out counting in standard drinks. */
+  standardDrinks?: boolean;
 }
 
 export const PRESETS: Preset[] = [
-  { label: "Alcohol", name: "Alcohol", category: "alcohol", unit: "drink" },
+  { label: "Alcohol", name: "Alcohol", category: "alcohol", unit: "drink", standardDrinks: true },
   { label: "Nicotine", name: "Nicotine", category: "nicotine", unit: "use" },
   { label: "Nicotine pouches", name: "Nicotine pouches", category: "nicotine", unit: "mg", amount: 6 },
   { label: "Cannabis", name: "Cannabis", category: "cannabis", unit: "session" },

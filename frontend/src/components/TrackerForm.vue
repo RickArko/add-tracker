@@ -15,6 +15,7 @@ const form = reactive({
   default_amount: props.tracker?.default_amount ?? (1 as number | ""),
   daily_limit: props.tracker?.daily_limit ?? ("" as number | ""),
   stopped_on: props.tracker?.stopped_on ?? "",
+  standard_drinks: !!props.tracker?.standard_drinks_from,
 });
 const chosen = ref<string | null>(props.tracker ? "edit" : null);
 const error = ref("");
@@ -26,12 +27,21 @@ const saved = props.tracker?.stopped_on ?? "";
 const lastDay = saved > yesterday() ? saved : yesterday();
 const safety = computed(() => safetyNote(form.category));
 
+function setStandardDrinks(on: boolean) {
+  form.standard_drinks = on;
+  // Going back restores what an existing tracker had, unless standard drinks is what it had.
+  const before = props.tracker && !props.tracker.standard_drinks_from ? props.tracker : null;
+  form.unit = on ? "standard drink" : before?.unit ?? (form.unit === "standard drink" ? "drink" : form.unit);
+  form.default_amount = on ? 1 : before?.default_amount ?? form.default_amount;
+}
+
 function choose(preset: Preset) {
   chosen.value = preset.label;
   form.name = preset.name;
   form.category = preset.category;
   form.unit = preset.unit;
   form.default_amount = preset.amount ?? 1;
+  setStandardDrinks(!!preset.standardDrinks);
 }
 
 async function submit() {
@@ -42,6 +52,7 @@ async function submit() {
     default_amount: form.default_amount === "" ? 1 : form.default_amount,
     daily_limit: !showLimit.value || form.daily_limit === "" ? null : form.daily_limit,
     stopped_on: form.goal === "quit" && form.stopped_on ? form.stopped_on : null,
+    standard_drinks: form.category === "alcohol" && form.standard_drinks,
   };
   const tz = `?tz=${encodeURIComponent(timeZone())}`;
   try {
@@ -81,7 +92,15 @@ async function submit() {
         <input v-model="form.name" required maxlength="60" autocomplete="off" />
       </label>
 
-      <div class="field-row">
+      <label v-if="form.category === 'alcohol'" class="goal-option standard-drinks">
+        <input type="checkbox" :checked="form.standard_drinks" @change="setStandardDrinks(($event.target as HTMLInputElement).checked)" />
+        <span>
+          <strong>Count in standard drinks</strong>
+          <small>Lets you pick a drink, its size and strength. A strong beer can count as more than 1, so check that your limit still suits you. Your limit stays as it is. Past logs keep their amounts, but show under the new name.</small>
+        </span>
+      </label>
+
+      <div v-if="!form.standard_drinks" class="field-row">
         <label class="field grow">
           <span>Count it in</span>
           <input v-model="form.unit" required maxlength="20" autocomplete="off" />

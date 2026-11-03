@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Entry, Stopped, TodayTracker } from "./api";
-import { addToCachedToday, advanceStopped, cachedToday, enqueue } from "./offline";
+import { addToCachedToday, advanceStopped, cachedToday, enqueue, withQueue } from "./offline";
 
 const saved: Stopped = { since: "2025-09-20", days_free: 100, current_days: 100, longest_days: 100, days_with_use: 0, urges: 0 };
 
@@ -61,6 +61,18 @@ describe("the saved copy on this device", () => {
     save("2026-01-01", [tracker(0, saved)]);
     enqueue({ client_id: "abcdefgh", tracker_id: 1, kind: "use", occurred_at: new Date(2026, 0, 2, 12).toISOString() });
     expect(stoppedNow()).toMatchObject({ days_free: 102, current_days: 1, days_with_use: 1 });
+  });
+
+  it("adds a waiting drink's own amount and marks, not the default", () => {
+    const drink = { name: "IPA", servings: 3, serving_ml: 355, abv: 6.5 };
+    enqueue({ client_id: "abcdefgh", tracker_id: 1, kind: "use", occurred_at: new Date().toISOString(), drink });
+    expect(withQueue([tracker(0, saved)])[0]).toMatchObject({ uses_today: 3, amount_today: 3.9 });
+  });
+
+  it("adds a served drink's marks to the saved copy", () => {
+    save("2026-01-04", [tracker(0, saved)]);
+    addToCachedToday({ tracker_id: 1, kind: "use", amount: 3.9, servings: 3, occurred_at: "2026-01-04T12:00:00Z" } as Entry);
+    expect(cachedToday()![0]).toMatchObject({ uses_today: 3, amount_today: 3.9 });
   });
 
   it("ignores a queued use that was undone", () => {
